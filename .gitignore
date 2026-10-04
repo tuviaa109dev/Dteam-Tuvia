@@ -1,1 +1,12 @@
 /job-queue
+
+# dependencies and build output
+node_modules/
+dist/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+*.db
