@@ -149,6 +149,29 @@ def test_rerun_creates_a_copy_of_a_finished_job(client, submit, fetch, worker, q
     assert client.post("/jobs/nope/rerun").status_code == 404
 
 
+def test_dev_reset_wipes_everything_only_when_enabled(client, submit, worker, queue, monkeypatch):
+    from app.config import settings
+
+    submit("email", idempotency_key="k")
+    submit("email", delay_seconds=60)
+    failing = submit("webhook", {"url": "https://x.io", "failure_rate": 1.0}, max_attempts=1)
+    while worker.run_once():
+        pass
+    assert queue.dead_letters() == [failing["id"]]
+
+    monkeypatch.setattr(settings, "dev_endpoints", False)
+    assert client.post("/dev/reset").status_code == 403
+    assert client.get("/jobs").json()["total"] == 3
+
+    monkeypatch.setattr(settings, "dev_endpoints", True)
+    response = client.post("/dev/reset")
+    assert response.status_code == 200 and response.json() == {"deleted_jobs": 3}
+    assert client.get("/jobs").json()["total"] == 0
+    assert queue.depth() == 0 and queue.dlq_size() == 0
+    # The idempotency key is gone too, so it can create a new job.
+    assert submit("email", idempotency_key="k")["status"] == "pending"
+
+
 def test_health_reports_queue_statistics(client, submit):
     submit("email", priority=1)
     submit("email", delay_seconds=300)

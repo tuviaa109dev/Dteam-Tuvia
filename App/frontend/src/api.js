@@ -29,4 +29,5 @@ export const api = {
   retryJob: (id) => request(`/jobs/${id}/retry`, { method: "POST" }).then((r) => r.body),
   rerunJob: (id) => request(`/jobs/${id}/rerun`, { method: "POST" }).then((r) => r.body),
   deadLetter: () => request("/dead-letter").then((r) => r.body),
+  devReset: () => request("/dev/reset", { method: "POST" }).then((r) => r.body),
 };

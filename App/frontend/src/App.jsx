@@ -3,6 +3,7 @@ import HealthPanel from "./components/HealthPanel.jsx";
 import SubmitJobForm from "./components/SubmitJobForm.jsx";
 import JobsTable from "./components/JobsTable.jsx";
 import JobDetail from "./components/JobDetail.jsx";
+import DevPanel from "./components/DevPanel.jsx";
 
 export default function App() {
   const [selectedId, setSelectedId] = useState(null);
@@ -19,15 +20,24 @@ export default function App() {
       <HealthPanel refreshKey={refreshKey} />
 
       <main className="layout">
-        <section className="card">
-          <h2>Submit a job</h2>
-          <SubmitJobForm
-            onSubmitted={(job) => {
-              setSelectedId(job.id);
+        <div className="side">
+          <section className="card">
+            <h2>Submit a job</h2>
+            <SubmitJobForm
+              onSubmitted={(job) => {
+                setSelectedId(job.id);
+                bump();
+              }}
+            />
+          </section>
+          <DevPanel
+            onFilled={bump}
+            onCleared={() => {
+              setSelectedId(null);
               bump();
             }}
           />
-        </section>
+        </div>
 
         <section className="card grow">
           <JobsTable refreshKey={refreshKey} selectedId={selectedId} onSelect={setSelectedId} onChanged={bump} />

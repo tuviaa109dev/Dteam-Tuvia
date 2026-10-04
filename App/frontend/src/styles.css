@@ -143,6 +143,34 @@ tbody tr.selected { background: color-mix(in srgb, var(--accent) 12%, transparen
 .row-action:hover { background: var(--accent); color: #fff; }
 .closing { margin-top: 10px; }
 
+/* dev tools */
+.side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.dev { display: flex; flex-direction: column; gap: 8px; }
+.dev-toggle {
+  align-self: flex-start; font-family: ui-monospace, Consolas, monospace; font-size: 12px;
+  color: var(--muted); border-style: dashed;
+}
+.dev-toggle.active { color: var(--accent); border-color: var(--accent); border-style: solid; }
+.dev-panel { border-style: dashed; display: flex; flex-direction: column; gap: 10px; }
+.dev-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.dev-help { margin: 0; font-size: 12px; line-height: 1.5; }
+button.danger-solid { background: var(--bad); border-color: var(--bad); color: #fff; }
+
+/* confirm dialog */
+.modal-backdrop {
+  position: fixed; inset: 0; z-index: 10; padding: 16px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, .45); animation: fade-in .15s ease-out;
+}
+.modal {
+  width: min(420px, 100%); background: var(--surface); border: 1px solid var(--border);
+  border-radius: 12px; padding: 20px; box-shadow: 0 20px 50px rgba(0, 0, 0, .3);
+  animation: toast-in .15s ease-out;
+}
+.modal p { margin: 10px 0 18px; line-height: 1.5; color: var(--muted); }
+.modal-actions { display: flex; justify-content: flex-end; gap: 8px; }
+@keyframes fade-in { from { opacity: 0; } }
+
 /* drawer */
 .drawer {
   position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw);

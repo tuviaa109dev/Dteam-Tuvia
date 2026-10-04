@@ -38,6 +38,8 @@ class Settings:
 
     log_level: str
     cors_origins: list[str]
+    # Enables POST /dev/reset (wipes all data). Never enable outside local development.
+    dev_endpoints: bool
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -60,6 +62,7 @@ class Settings:
             sim_time_scale=float(_env("SIM_TIME_SCALE", "1")),
             log_level=_env("LOG_LEVEL", "INFO"),
             cors_origins=[o.strip() for o in _env("CORS_ORIGINS", "*").split(",") if o.strip()],
+            dev_endpoints=_env("DEV_ENDPOINTS", "false").lower() in ("1", "true", "yes"),
         )
 
     def retry_delay(self, failed_attempt: int) -> float:

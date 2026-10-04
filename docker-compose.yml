@@ -53,7 +53,9 @@ services:
   api:
     build: *backend-build
     command: ["python", "-m", "app.api"]
-    environment: *backend-env
+    environment:
+      <<: *backend-env
+      DEV_ENDPOINTS: "true"   # enables the dashboard's "Clear" button (POST /dev/reset); local use only
     ports:
       - "8000:8000"
     depends_on:

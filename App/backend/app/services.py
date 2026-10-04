@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 from redis.exceptions import RedisError
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -218,6 +218,21 @@ def dead_letter_jobs(db: Session, queue: JobQueue, limit: int = 100) -> list[Job
         return []
     jobs = {j.id: j for j in db.scalars(select(Job).where(Job.id.in_(ids)))}
     return [jobs[i] for i in ids if i in jobs]
+
+
+def reset_all_data(db: Session, queue: JobQueue) -> int:
+    """Dev only: delete every job, log and idempotency key, and empty the Redis queue/DLQ.
+    Workers mid-job simply lose their lease (their fenced writes match no row) and move on."""
+    deleted = db.scalar(select(func.count()).select_from(Job)) or 0
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(text("TRUNCATE job_logs, idempotency_keys, jobs RESTART IDENTITY"))
+    else:
+        for model in (JobLog, IdempotencyKey, Job):
+            db.execute(delete(model))
+    db.commit()
+    queue.reset()
+    log.warning("all job data reset", extra={"jobs_deleted": deleted})
+    return deleted
 
 
 def queue_stats(db: Session, queue: JobQueue) -> dict:

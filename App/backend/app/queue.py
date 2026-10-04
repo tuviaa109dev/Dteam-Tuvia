@@ -84,6 +84,10 @@ class JobQueue:
     def dlq_size(self) -> int:
         return int(self.redis.llen(self.dlq_key))
 
+    def reset(self) -> None:
+        """Drop all queued work, the DLQ and stats (dev reset). Live worker registrations stay."""
+        self.redis.delete(self.ready_key, self.dlq_key, self.stats_key, self.seq_key)
+
     # ---- stats, worker registry, locks -------------------------------------------------------
 
     def incr_stat(self, name: str, amount: int = 1) -> None:

@@ -140,6 +140,14 @@ def dead_letter_queue(db: DB, queue: Queue, limit: Annotated[int, Query(ge=1, le
     return services.dead_letter_jobs(db, queue, limit)
 
 
+@app.post("/dev/reset", responses={403: {"description": "Dev endpoints are disabled"}})
+def dev_reset(db: DB, queue: Queue):
+    """Delete all jobs, logs, idempotency keys and queued work. Requires DEV_ENDPOINTS=true."""
+    if not settings.dev_endpoints:
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "dev endpoints are disabled (set DEV_ENDPOINTS=true)")
+    return {"deleted_jobs": services.reset_all_data(db, queue)}
+
+
 @app.get("/health", response_model=HealthOut, responses={503: {"model": HealthOut}})
 def health(response: Response, db: DB, queue: Queue):
     db_ok = redis_ok = False
