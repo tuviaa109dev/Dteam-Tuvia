@@ -16,7 +16,7 @@ Dteam Tuvia/
 │   ├── backend/           Python 3.12: FastAPI API + worker (package `app`)
 │   ├── frontend/          React 18 + Vite dashboard, served by nginx
 │   └── db/init.sql        creates the test database
-└── Tests/                 pytest suite (26 tests)
+└── Tests/                 pytest suite (28 tests)
 ```
 
 ---
@@ -57,7 +57,7 @@ pip install -r App/backend/requirements-dev.txt
 pytest Tests
 ```
 
-Both run the same 26 tests:
+Both run the same 28 tests:
 
 | Requirement            | Test(s)                                                                                                                                                                                      |
 | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -72,6 +72,8 @@ Both run the same 26 tests:
 | Crash recovery         | `test_crashed_worker_job_is_recovered`, `test_crashed_worker_on_last_attempt_dead_letters`, `test_reconciler_republishes_jobs_lost_from_redis`                                               |
 | Graceful shutdown      | `test_graceful_shutdown_finishes_current_job`                                                                                                                                                |
 | Health                 | `test_health_reports_queue_statistics`                                                                                                                                                       |
+| Rerun                  | `test_rerun_creates_a_copy_of_a_finished_job`                                                                                                                                                |
+| Dev reset              | `test_dev_reset_wipes_everything_only_when_enabled`                                                                                                                                          |
 
 ## 3. How to submit a test job
 
@@ -111,7 +113,9 @@ curl http://localhost:8000/jobs/<id>
 curl http://localhost:8000/jobs/<id>/logs      # submitted -> claimed -> completed
 ```
 
-You can also submit jobs from the dashboard at http://localhost:3000.
+You can also submit jobs from the dashboard at http://localhost:3000. Its **Dev** button (under the
+submit form) opens a panel with **Fill**, which submits 10 demo jobs including a few that fail, and
+**Clear**, which wipes all data.
 
 **Other job types**, payloads to try:
 
@@ -194,7 +198,9 @@ pending/scheduled) and manual retry `FAILED → PENDING`. Details: [DECISIONS.md
 | GET    | `/jobs/{id}/logs`     | Per-job log (info / warning / error, with metadata)          |
 | POST   | `/jobs/{id}/cancel`   | Cancel a pending or scheduled job (409 otherwise)            |
 | POST   | `/jobs/{id}/retry`    | Retry a failed job (409 otherwise)                           |
+| POST   | `/jobs/{id}/rerun`    | New copy of a completed/cancelled/failed job (201)           |
 | GET    | `/health`             | DB/Redis status, queue stats, active workers                 |
+| POST   | `/dev/reset`          | Delete all data; only when `DEV_ENDPOINTS=true` (403 otherwise) |
 
 ### Configuration
 
@@ -212,6 +218,7 @@ Environment variables (defaults in `App/backend/app/config.py`, overridden in `d
 | `IDEMPOTENCY_TTL_HOURS`   | 24      | How long idempotency keys are kept              |
 | `RECONCILE_GRACE_SECONDS` | 30      | Pending jobs missing from Redis get re-queued   |
 | `SIM_TIME_SCALE`          | 1       | Speed multiplier for the mock jobs' sleeps      |
+| `DEV_ENDPOINTS`           | false   | Enables `POST /dev/reset` (on in docker-compose; local use only) |
 
 ### Code map
 
