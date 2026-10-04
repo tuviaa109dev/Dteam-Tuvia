@@ -160,7 +160,7 @@ docker compose stop worker                                            # graceful
 ```
 
 - **API**: validates and stores the job in PostgreSQL first, then publishes the job ID to Redis.
-  Provides submit, get, list (filter by status/type), cancel, retry, logs, dead-letter list and health.
+  Provides submit, get, list (filter by status/type), cancel, retry, rerun, logs and health.
 - **Queue (Redis)**: a sorted set of ready job IDs. The score encodes priority (higher first) and
   arrival order (FIFO within a priority). `BZPOPMIN` hands each entry to exactly one worker.
   Also holds the dead letter list and a registry of live workers.
@@ -194,7 +194,6 @@ pending/scheduled) and manual retry `FAILED → PENDING`. Details: [DECISIONS.md
 | GET    | `/jobs/{id}/logs`     | Per-job log (info / warning / error, with metadata)          |
 | POST   | `/jobs/{id}/cancel`   | Cancel a pending or scheduled job (409 otherwise)            |
 | POST   | `/jobs/{id}/retry`    | Retry a failed job (409 otherwise)                           |
-| GET    | `/dead-letter`        | Permanently failed jobs                                      |
 | GET    | `/health`             | DB/Redis status, queue stats, active workers                 |
 
 ### Configuration

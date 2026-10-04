@@ -135,11 +135,6 @@ def rerun_job(job_id: str, db: DB, queue: Queue):
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
 
 
-@app.get("/dead-letter", response_model=list[JobOut])
-def dead_letter_queue(db: DB, queue: Queue, limit: Annotated[int, Query(ge=1, le=500)] = 100):
-    return services.dead_letter_jobs(db, queue, limit)
-
-
 @app.post("/dev/reset", responses={403: {"description": "Dev endpoints are disabled"}})
 def dev_reset(db: DB, queue: Queue):
     """Delete all jobs, logs, idempotency keys and queued work. Requires DEV_ENDPOINTS=true."""

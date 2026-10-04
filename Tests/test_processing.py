@@ -116,7 +116,6 @@ def test_failure_retries_with_exponential_backoff_then_dead_letters(client, subm
     assert state["status"] == "failed" and state["attempts"] == 3
     assert state["dead_lettered_at"] is not None
     assert queue.dead_letters() == [job_id]
-    assert [j["id"] for j in client.get("/dead-letter").json()] == [job_id]
 
     # Manual retry: back to pending with a fresh attempt budget, out of the DLQ.
     response = client.post(f"/jobs/{job_id}/retry")

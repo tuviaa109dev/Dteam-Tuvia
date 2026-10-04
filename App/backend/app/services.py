@@ -212,14 +212,6 @@ def rerun_job(db: Session, queue: JobQueue, job_id: str, cfg: Settings = setting
     return job
 
 
-def dead_letter_jobs(db: Session, queue: JobQueue, limit: int = 100) -> list[Job]:
-    ids = queue.dead_letters(limit)
-    if not ids:
-        return []
-    jobs = {j.id: j for j in db.scalars(select(Job).where(Job.id.in_(ids)))}
-    return [jobs[i] for i in ids if i in jobs]
-
-
 def reset_all_data(db: Session, queue: JobQueue) -> int:
     """Dev only: delete every job, log and idempotency key, and empty the Redis queue/DLQ.
     Workers mid-job simply lose their lease (their fenced writes match no row) and move on."""
