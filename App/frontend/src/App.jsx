@@ -34,7 +34,7 @@ export default function App() {
         </div>
 
         <div className="side grow">
-          <section className="card">
+          <section className="card jobs-card">
             <JobsTable
               refreshKey={refreshKey}
               selectedId={selectedId}
