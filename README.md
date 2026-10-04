@@ -29,11 +29,11 @@ Requirements: Docker with Docker Compose v2.
 docker compose up --build
 ```
 
-| URL                          | What                                     |
-|------------------------------|------------------------------------------|
-| http://localhost:3000        | React dashboard                          |
-| http://localhost:8000/docs   | API with interactive Swagger docs        |
-| http://localhost:8000/health | Health check + queue statistics          |
+| URL                          | What                              |
+| ---------------------------- | --------------------------------- |
+| http://localhost:3000        | React dashboard                   |
+| http://localhost:8000/docs   | API with interactive Swagger docs |
+| http://localhost:8000/health | Health check + queue statistics   |
 
 This starts PostgreSQL, Redis, a one-shot `migrate` service that creates the schema, the API, and
 **two worker containers** with 2 job slots each. Scale workers with
@@ -59,19 +59,19 @@ pytest Tests
 
 Both run the same 26 tests:
 
-| Requirement            | Test(s)                                                                                       |
-|------------------------|-----------------------------------------------------------------------------------------------|
-| Submission & retrieval | `test_submit_and_retrieve_job`, `test_list_jobs_with_filters`, `test_submission_validates_payload` |
-| Completion flow        | `test_job_completion_flow`, `test_other_job_types_complete`, `test_batch_job_tracks_progress` |
+| Requirement            | Test(s)                                                                                                                                                                                      |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Submission & retrieval | `test_submit_and_retrieve_job`, `test_list_jobs_with_filters`, `test_submission_validates_payload`                                                                                           |
+| Completion flow        | `test_job_completion_flow`, `test_other_job_types_complete`, `test_batch_job_tracks_progress`                                                                                                |
 | Failure & retry        | `test_failure_retries_with_exponential_backoff_then_dead_letters`, `test_transient_failure_then_success`, `test_poison_message_goes_straight_to_dead_letter`, `test_job_timeout_is_enforced` |
-| Cancellation           | `test_cancel_pending_and_scheduled_jobs`, `test_cancel_wins_over_stale_queue_entry`           |
-| Idempotency            | `test_idempotency_returns_existing_job`, `test_idempotency_key_expires_after_ttl`             |
-| Priority ordering      | `test_priority_ordering`, `test_queue_score_orders_priority_then_fifo`                        |
-| Scheduled jobs         | `test_scheduled_job_waits_until_due`                                                          |
-| Duplicate pickup       | `test_job_can_only_be_claimed_once`, `test_concurrent_workers_process_each_job_exactly_once`  |
-| Crash recovery         | `test_crashed_worker_job_is_recovered`, `test_crashed_worker_on_last_attempt_dead_letters`, `test_reconciler_republishes_jobs_lost_from_redis` |
-| Graceful shutdown      | `test_graceful_shutdown_finishes_current_job`                                                 |
-| Health                 | `test_health_reports_queue_statistics`                                                        |
+| Cancellation           | `test_cancel_pending_and_scheduled_jobs`, `test_cancel_wins_over_stale_queue_entry`                                                                                                          |
+| Idempotency            | `test_idempotency_returns_existing_job`, `test_idempotency_key_expires_after_ttl`                                                                                                            |
+| Priority ordering      | `test_priority_ordering`, `test_queue_score_orders_priority_then_fifo`                                                                                                                       |
+| Scheduled jobs         | `test_scheduled_job_waits_until_due`                                                                                                                                                         |
+| Duplicate pickup       | `test_job_can_only_be_claimed_once`, `test_concurrent_workers_process_each_job_exactly_once`                                                                                                 |
+| Crash recovery         | `test_crashed_worker_job_is_recovered`, `test_crashed_worker_on_last_attempt_dead_letters`, `test_reconciler_republishes_jobs_lost_from_redis`                                               |
+| Graceful shutdown      | `test_graceful_shutdown_finishes_current_job`                                                                                                                                                |
+| Health                 | `test_health_reports_queue_statistics`                                                                                                                                                       |
 
 ## 3. How to submit a test job
 
@@ -115,12 +115,12 @@ You can also submit jobs from the dashboard at http://localhost:3000.
 
 **Other job types**, payloads to try:
 
-| type      | example payload                                                         | behaviour                                     |
-|-----------|-------------------------------------------------------------------------|-----------------------------------------------|
-| `email`   | `{"to": "a@b.com", "subject": "Hi", "body": "..."}`                     | 1–3 s, returns mock `message_id`              |
-| `webhook` | `{"url": "https://example.com/hook", "failure_rate": 0.2}`              | 1–2 s, 20% simulated failures (retried)       |
-| `report`  | `{"report_type": "sales", "format": "pdf"}`                             | 3–5 s, returns mock `file_url`                |
-| `batch`   | `{"items": [1,2,3,4,5,6,7,8,9,10], "item_delay_ms": 300}`               | live `progress` %, returns summary            |
+| type      | example payload                                            | behaviour                               |
+| --------- | ---------------------------------------------------------- | --------------------------------------- |
+| `email`   | `{"to": "a@b.com", "subject": "Hi", "body": "..."}`        | 1–3 s, returns mock `message_id`        |
+| `webhook` | `{"url": "https://example.com/hook", "failure_rate": 0.2}` | 1–2 s, 20% simulated failures (retried) |
+| `report`  | `{"report_type": "sales", "format": "pdf"}`                | 3–5 s, returns mock `file_url`          |
+| `batch`   | `{"items": [1,2,3,4,5,6,7,8,9,10], "item_delay_ms": 300}`  | live `progress` %, returns summary      |
 
 Optional job fields: `priority` (-100…100, higher first; default 0), `max_attempts` (default 3),
 `delay_seconds` **or** `scheduled_at` (ISO time) for future execution, `timeout_seconds`
@@ -170,10 +170,10 @@ docker compose stop worker                                            # graceful
   exponential backoff (30 s, then 120 s). After 3 attempts the job is `FAILED` and moved to the
   dead letter queue. On SIGTERM a worker finishes its current job before exiting.
 - **Maintenance loop** (inside each worker, coordinated by a Redis lock):
-  - promotes due **scheduled** jobs to the queue;
-  - **reaps** jobs whose lease expired (crashed worker) and retries them;
-  - **reconciles** pending jobs missing from Redis;
-  - purges idempotency keys older than 24 h.
+    - promotes due **scheduled** jobs to the queue;
+    - **reaps** jobs whose lease expired (crashed worker) and retries them;
+    - **reconciles** pending jobs missing from Redis;
+    - purges idempotency keys older than 24 h.
 - **Database (PostgreSQL)**: the source of truth for job state, attempts, results, errors,
   progress and the per-job log. Redis can be rebuilt from it at any time.
 
@@ -187,7 +187,7 @@ pending/scheduled) and manual retry `FAILED → PENDING`. Details: [DECISIONS.md
 ### API endpoints
 
 | Method | Path                  | Description                                                  |
-|--------|-----------------------|--------------------------------------------------------------|
+| ------ | --------------------- | ------------------------------------------------------------ |
 | POST   | `/jobs`               | Submit a job (201; 200 + `Idempotent-Replayed` on key reuse) |
 | GET    | `/jobs/{id}`          | Status, progress, result or error                            |
 | GET    | `/jobs?status=&type=` | List with filters, `limit` / `offset` pagination             |
@@ -202,7 +202,7 @@ pending/scheduled) and manual retry `FAILED → PENDING`. Details: [DECISIONS.md
 Environment variables (defaults in `App/backend/app/config.py`, overridden in `docker-compose.yml`):
 
 | Variable                  | Default | Meaning                                         |
-|---------------------------|---------|-------------------------------------------------|
+| ------------------------- | ------- | ----------------------------------------------- |
 | `DEFAULT_MAX_ATTEMPTS`    | 3       | Attempts before permanent failure               |
 | `RETRY_BASE_DELAY`        | 30      | Seconds before attempt 2                        |
 | `RETRY_BACKOFF_FACTOR`    | 4       | Multiplier per attempt (30 s → 120 s)           |
