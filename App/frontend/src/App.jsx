@@ -8,6 +8,7 @@ import DevPanel from "./components/DevPanel.jsx";
 export default function App() {
   const [selectedId, setSelectedId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [statusFilter, setStatusFilter] = useState(""); // shared by the stat tiles and the table dropdown
   const bump = () => setRefreshKey((k) => k + 1);
 
   return (
@@ -17,7 +18,7 @@ export default function App() {
         <span className="muted">API → Redis queue → workers → PostgreSQL</span>
       </header>
 
-      <HealthPanel refreshKey={refreshKey} />
+      <HealthPanel refreshKey={refreshKey} activeStatus={statusFilter} onSelectStatus={setStatusFilter} />
 
       <main className="layout">
         <div className="side">
@@ -40,7 +41,14 @@ export default function App() {
         </div>
 
         <section className="card grow">
-          <JobsTable refreshKey={refreshKey} selectedId={selectedId} onSelect={setSelectedId} onChanged={bump} />
+          <JobsTable
+            refreshKey={refreshKey}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
+            onChanged={bump}
+            status={statusFilter}
+            onStatusChange={setStatusFilter}
+          />
         </section>
       </main>
 

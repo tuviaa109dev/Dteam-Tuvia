@@ -9,6 +9,15 @@
   --bad: #e03131;
   --warn: #e8590c;
   --info: #1971c2;
+  /* one color per job status, shared by badges, the status filter and the stat tiles */
+  --st-scheduled: #7048e8;
+  --st-pending: #1971c2;
+  --st-processing: #e8590c;
+  --st-completed: #2f9e44;
+  --st-failed: #e03131;
+  --st-cancelled: #6b7280;
+  --active-bg: #e7f5ff;
+  --active-border: #74c0fc;
   color-scheme: light;
   font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   font-size: 14px;
@@ -24,6 +33,11 @@
     --text: #e6e8eb;
     --muted: #8b949e;
     --accent: #748ffc;
+    --st-scheduled: #9775fa;
+    --st-pending: #4dabf7;
+    --st-cancelled: #8b949e;
+    --active-bg: rgba(116, 192, 252, .16);
+    --active-border: #4dabf7;
     color-scheme: dark;
   }
 }
@@ -56,8 +70,15 @@ h3 { font-size: 13px; margin: 16px 0 6px; text-transform: uppercase; letter-spac
 .stat { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
 .stat-value { font-size: 20px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .stat-label { font-size: 12px; color: var(--muted); }
-.stat.good .stat-value { color: var(--good); }
-.stat.bad .stat-value { color: var(--bad); }
+.stat.clickable { font: inherit; color: inherit; text-align: left; background: var(--surface); cursor: pointer; transition: background .15s, border-color .15s; }
+.stat.clickable:hover { border-color: var(--accent); }
+.stat.clickable.active { background: var(--active-bg); border-color: var(--active-border); }
+.stat-scheduled .stat-value { color: var(--st-scheduled); }
+.stat-pending .stat-value { color: var(--st-pending); }
+.stat-processing .stat-value { color: var(--st-processing); }
+.stat-completed .stat-value { color: var(--st-completed); }
+.stat-failed .stat-value { color: var(--st-failed); }
+.stat-cancelled .stat-value { color: var(--st-cancelled); }
 
 /* form */
 .form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
@@ -127,16 +148,35 @@ tbody tr.selected { background: color-mix(in srgb, var(--accent) 12%, transparen
 .pager { display: flex; justify-content: flex-end; align-items: center; gap: 8px; margin-top: 8px; }
 
 .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 500; border: 1px solid currentColor; }
-.badge-scheduled { color: #7048e8; }
-.badge-pending { color: var(--info); }
-.badge-processing { color: var(--warn); }
-.badge-completed { color: var(--good); }
-.badge-failed { color: var(--bad); }
-.badge-cancelled { color: var(--muted); }
+.badge-scheduled { color: var(--st-scheduled); }
+.badge-pending { color: var(--st-pending); }
+.badge-processing { color: var(--st-processing); }
+.badge-completed { color: var(--st-completed); }
+.badge-failed { color: var(--st-failed); }
+.badge-cancelled { color: var(--st-cancelled); }
+
+/* status filter dropdown: the closed select and each option take their status color */
+.status-select.status-scheduled, option.status-scheduled { color: var(--st-scheduled); }
+.status-select.status-pending, option.status-pending { color: var(--st-pending); }
+.status-select.status-processing, option.status-processing { color: var(--st-processing); }
+.status-select.status-completed, option.status-completed { color: var(--st-completed); }
+.status-select.status-failed, option.status-failed { color: var(--st-failed); }
+.status-select.status-cancelled, option.status-cancelled { color: var(--st-cancelled); }
+option.status-all { color: var(--text); }
+.status-select.status-scheduled, .status-select.status-pending, .status-select.status-processing,
+.status-select.status-completed, .status-select.status-failed, .status-select.status-cancelled {
+  border-color: currentColor; font-weight: 500;
+}
+
+/* table footer with the bulk action under the Action column */
+tfoot td { border-bottom: none; padding-top: 10px; }
+.bulk-status { text-align: right; }
+.bulk-status .notice { display: inline-block; padding: 4px 10px; }
+.bulk-action { white-space: nowrap; }
 
 .progress { display: inline-block; vertical-align: middle; width: 80px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .progress-fill { height: 100%; background: var(--accent); transition: width .3s; }
-.progress-scheduled .progress-fill { background: #7048e8; transition: width .25s linear; }
+.progress-scheduled .progress-fill { background: var(--st-scheduled); transition: width .25s linear; }
 .countdown { display: inline-flex; align-items: center; gap: 6px; }
 .runs-at { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row-action { padding: 2px 10px; font-size: 12px; color: var(--accent); border-color: var(--accent); }

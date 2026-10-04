@@ -37,7 +37,7 @@ function formatRemaining(ms) {
 }
 
 /** Purple bar filling up from when the job was scheduled (`from`) until it is due (`to`). */
-export function Countdown({ from, to }) {
+export function Countdown({ from, to, dueLabel = "due now" }) {
   const now = useNow(250);
   const start = new Date(from).getTime();
   const end = new Date(to).getTime();
@@ -47,7 +47,7 @@ export function Countdown({ from, to }) {
   return (
     <span className="countdown">
       <ProgressBar value={pct} tone="scheduled" />
-      <span className="muted">{remaining > 0 ? `in ${formatRemaining(remaining)}` : "due now"}</span>
+      <span className="muted">{remaining > 0 ? `in ${formatRemaining(remaining)}` : dueLabel}</span>
     </span>
   );
 }

@@ -1,19 +1,38 @@
 import { api } from "../api.js";
 import { usePolling } from "../usePolling.js";
 
-function Stat({ label, value, tone }) {
-  return (
-    <div className={`stat ${tone || ""}`}>
+/** Stat tiles that filter the jobs table. `status: ""` means "all statuses". */
+const STATUS_STATS = [
+  { label: "Total jobs", status: "" },
+  { label: "Scheduled", status: "scheduled" },
+  { label: "Pending", status: "pending" },
+  { label: "Processing", status: "processing" },
+  { label: "Completed", status: "completed" },
+  { label: "Failed", status: "failed" },
+  { label: "Cancelled", status: "cancelled" },
+];
+
+function Stat({ label, value, status, active, onClick }) {
+  const tone = status ? `stat-${status}` : "";
+  const content = (
+    <>
       <div className="stat-value">{value ?? "—"}</div>
       <div className="stat-label">{label}</div>
-    </div>
+    </>
+  );
+  if (!onClick) return <div className="stat">{content}</div>;
+  return (
+    <button type="button" className={`stat clickable ${tone} ${active ? "active" : ""}`} aria-pressed={active} onClick={onClick}>
+      {content}
+    </button>
   );
 }
 
-export default function HealthPanel({ refreshKey }) {
+export default function HealthPanel({ refreshKey, activeStatus, onSelectStatus }) {
   const { data, error } = usePolling(api.health, 2000, [refreshKey]);
   const q = data?.queue;
-  const s = data?.jobs_by_status;
+  const counts = data?.jobs_by_status;
+  const total = counts ? Object.values(counts).reduce((sum, n) => sum + n, 0) : null;
   const workers = data?.workers ?? [];
 
   return (
@@ -25,17 +44,21 @@ export default function HealthPanel({ refreshKey }) {
           <span className="muted">
             DB {data.database ? "✓" : "✗"} · Redis {data.redis ? "✓" : "✗"} · {workers.length} worker
             {workers.length === 1 ? "" : "s"} ({workers.reduce((n, w) => n + (w.active_jobs?.length || 0), 0)} busy)
+            {q && <> · {q.ready} ready in queue</>}
           </span>
         )}
       </div>
       <div className="stats">
-        <Stat label="Ready in queue" value={q?.ready} />
-        <Stat label="Scheduled" value={q?.scheduled} />
-        <Stat label="Processing" value={q?.processing} />
-        <Stat label="Completed" value={s?.completed} tone="good" />
-        <Stat label="Failed" value={s?.failed} tone="bad" />
-        <Stat label="Cancelled" value={s?.cancelled} />
-        <Stat label="Dead letter" value={q?.dead_letter} tone={q?.dead_letter ? "bad" : ""} />
+        {STATUS_STATS.map(({ label, status }) => (
+          <Stat
+            key={label}
+            label={label}
+            status={status}
+            value={status ? counts?.[status] : total}
+            active={activeStatus === status}
+            onClick={() => onSelectStatus(status)}
+          />
+        ))}
         <Stat
           label="Oldest pending"
           value={q?.oldest_pending_age_seconds != null ? `${Math.round(q.oldest_pending_age_seconds)}s` : "—"}
