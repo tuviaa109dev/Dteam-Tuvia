@@ -157,7 +157,7 @@ export default function JobsTable({ refreshKey, selectedId, onSelect, onChanged,
               </td></tr>
             )}
           </tbody>
-          {bulk && total > 0 && (
+          {bulk && total > 1 && (
             <tfoot>
               <tr>
                 <td colSpan={COLUMNS - 1} className="bulk-status">
