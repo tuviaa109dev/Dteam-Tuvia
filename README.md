@@ -113,8 +113,8 @@ curl http://localhost:8000/jobs/<id>
 curl http://localhost:8000/jobs/<id>/logs      # submitted -> claimed -> completed
 ```
 
-You can also submit jobs from the dashboard at http://localhost:3000. Its **Dev** button (under the
-submit form) opens a panel with **Fill**, which submits 10 demo jobs including a few that fail, and
+You can also submit jobs from the dashboard at http://localhost:3000. Its **Dev** button (shown under
+the jobs list while the **Processing** stat is selected) opens a panel with **Fill**, which submits 10 demo jobs including a few that fail, and
 **Clear**, which wipes all data.
 
 **Other job types**, payloads to try:
