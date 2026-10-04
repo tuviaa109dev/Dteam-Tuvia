@@ -74,6 +74,39 @@ button.primary { background: var(--accent); border-color: var(--accent); color: 
 button.danger { color: var(--bad); border-color: var(--bad); }
 .segmented { display: flex; gap: 4px; flex-wrap: wrap; }
 .segmented button.active { background: var(--accent); border-color: var(--accent); color: #fff; }
+.form .field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+.form label input, .form label select, .form label textarea { width: 100%; }
+.hint { color: var(--muted); opacity: .8; }
+.row-2 { grid-template-columns: 1fr 1fr; }
+.row-url { grid-template-columns: 96px 1fr; }
+.payload-fields {
+  border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px 12px; margin: 0;
+  display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.payload-fields legend { font-size: 12px; color: var(--muted); padding: 0 4px; }
+.kv-row { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; }
+.kv-row input { min-width: 0; }
+.kv-row button { padding: 4px 8px; color: var(--muted); }
+button.link { align-self: flex-start; border: none; background: none; padding: 2px 0; color: var(--accent); font-size: 12px; }
+input[type="range"] { padding: 0; accent-color: var(--accent); }
+
+/* read-only request preview with floating notice */
+.preview { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.preview-label { font-size: 12px; color: var(--muted); }
+.preview textarea:disabled {
+  width: 100%; resize: none; color: var(--muted); background: var(--bg);
+  cursor: default; opacity: 1; -webkit-text-fill-color: var(--muted);
+}
+.toast {
+  position: absolute; top: 26px; left: 8px; right: 8px; z-index: 1;
+  display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;
+  background: var(--surface); box-shadow: 0 6px 20px rgba(0, 0, 0, .15);
+  animation: toast-in .2s ease-out;
+}
+.toast.notice-ok, .toast.notice-info { animation: toast-in .2s ease-out, toast-out .4s ease-in 4.6s forwards; }
+.toast button { border: none; background: none; padding: 0 2px; color: inherit; }
+@keyframes toast-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes toast-out { to { opacity: 0; transform: translateY(-6px); } }
 
 .notice { border-radius: 6px; padding: 8px 10px; font-size: 13px; border: 1px solid var(--border); word-break: break-word; }
 .notice-ok { border-color: var(--good); color: var(--good); }
