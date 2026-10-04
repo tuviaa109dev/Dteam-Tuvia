@@ -31,25 +31,30 @@ export default function App() {
               }}
             />
           </section>
-          <DevPanel
-            onFilled={bump}
-            onCleared={() => {
-              setSelectedId(null);
-              bump();
-            }}
-          />
         </div>
 
-        <section className="card grow">
-          <JobsTable
-            refreshKey={refreshKey}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-            onChanged={bump}
-            status={statusFilter}
-            onStatusChange={setStatusFilter}
-          />
-        </section>
+        <div className="side grow">
+          <section className="card">
+            <JobsTable
+              refreshKey={refreshKey}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+              onChanged={bump}
+              status={statusFilter}
+              onStatusChange={setStatusFilter}
+            />
+          </section>
+          {/* Dev tools are tucked away: they only appear while the Processing stat is selected. */}
+          {statusFilter === "processing" && (
+            <DevPanel
+              onFilled={bump}
+              onCleared={() => {
+                setSelectedId(null);
+                bump();
+              }}
+            />
+          )}
+        </div>
       </main>
 
       {selectedId && (
