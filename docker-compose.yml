@@ -1,0 +1,116 @@
+name: job-queue
+
+x-backend-build: &backend-build
+  context: .
+  target: backend
+
+x-backend-env: &backend-env
+  DATABASE_URL: postgresql+psycopg://jobs:jobs@postgres:5432/jobs
+  REDIS_URL: redis://redis:6379/0
+  LOG_LEVEL: INFO
+  DEFAULT_MAX_ATTEMPTS: "3"
+  RETRY_BASE_DELAY: "30"      # attempt 2 after 30s
+  RETRY_BACKOFF_FACTOR: "4"   # attempt 3 after 120s
+  LEASE_SECONDS: "30"
+  HEARTBEAT_INTERVAL: "10"
+  IDEMPOTENCY_TTL_HOURS: "24"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: jobs
+      POSTGRES_USER: jobs
+      POSTGRES_PASSWORD: jobs
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./App/db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U jobs -d jobs"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  migrate:
+    build: *backend-build
+    command: ["python", "-m", "app.migrate"]
+    environment: *backend-env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: *backend-build
+    command: ["python", "-m", "app.api"]
+    environment: *backend-env
+    ports:
+      - "8000:8000"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build: *backend-build
+    command: ["python", "-m", "app.worker"]
+    environment:
+      <<: *backend-env
+      WORKER_CONCURRENCY: "2"
+    deploy:
+      replicas: 2          # scale further with: docker compose up --scale worker=4
+    # SIGTERM -> stop pulling jobs and finish in-flight ones; SIGKILL only after this period.
+    stop_signal: SIGTERM
+    stop_grace_period: 60s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      target: frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - api
+
+  # Runs the test suite against real PostgreSQL + Redis:
+  #   docker compose --profile test run --rm tests
+  tests:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    environment:
+      TEST_DATABASE_URL: postgresql+psycopg://jobs:jobs@postgres:5432/jobs_test
+      TEST_REDIS_URL: redis://redis:6379/15
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  pgdata:
+  redisdata:

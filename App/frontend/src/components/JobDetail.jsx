@@ -1,0 +1,91 @@
+import { useState } from "react";
+import { api } from "../api.js";
+import { usePolling } from "../usePolling.js";
+import StatusBadge, { ProgressBar, formatTime } from "./StatusBadge.jsx";
+
+function Json({ value }) {
+  return <pre className="json">{JSON.stringify(value, null, 2)}</pre>;
+}
+
+export default function JobDetail({ jobId, onClose, onChanged }) {
+  const { data: job, refresh } = usePolling(() => api.getJob(jobId), 1000, [jobId]);
+  const { data: logs } = usePolling(() => api.getLogs(jobId), 1500, [jobId]);
+  const [actionError, setActionError] = useState(null);
+
+  const act = async (fn) => {
+    setActionError(null);
+    try {
+      await fn(jobId);
+      await refresh();
+      onChanged();
+    } catch (err) {
+      setActionError(err.message);
+    }
+  };
+
+  return (
+    <aside className="drawer">
+      <div className="drawer-head">
+        <div>
+          <div className="muted mono">{jobId}</div>
+          {job && (
+            <h2>
+              {job.type} <StatusBadge status={job.status} />
+            </h2>
+          )}
+        </div>
+        <button onClick={onClose} aria-label="Close">✕</button>
+      </div>
+
+      {job && (
+        <>
+          <div className="actions">
+            {["pending", "scheduled"].includes(job.status) && (
+              <button className="danger" onClick={() => act(api.cancelJob)}>Cancel job</button>
+            )}
+            {job.status === "failed" && (
+              <button className="primary" onClick={() => act(api.retryJob)}>Retry job</button>
+            )}
+          </div>
+          {actionError && <div className="notice notice-error">{actionError}</div>}
+
+          <dl className="facts">
+            <dt>Priority</dt><dd>{job.priority}</dd>
+            <dt>Attempts</dt><dd>{job.attempts} / {job.max_attempts}</dd>
+            <dt>Progress</dt><dd><ProgressBar value={job.progress} /> {job.progress}%</dd>
+            <dt>Timeout</dt><dd>{job.timeout_seconds}s</dd>
+            <dt>Created</dt><dd>{formatTime(job.created_at)}</dd>
+            <dt>Started</dt><dd>{formatTime(job.started_at)}</dd>
+            <dt>Completed</dt><dd>{formatTime(job.completed_at)}</dd>
+            {job.status === "scheduled" && (<><dt>Runs at</dt><dd>{formatTime(job.run_at)}</dd></>)}
+            {job.worker_id && (<><dt>Worker</dt><dd className="mono">{job.worker_id}</dd></>)}
+            {job.idempotency_key && (<><dt>Idempotency key</dt><dd className="mono">{job.idempotency_key}</dd></>)}
+            {job.dead_lettered_at && (<><dt>Dead-lettered</dt><dd>{formatTime(job.dead_lettered_at)}</dd></>)}
+          </dl>
+
+          {job.error && (
+            <div className="notice notice-error">
+              <strong>{job.error_type}</strong>: {job.error}
+            </div>
+          )}
+
+          <h3>Payload</h3>
+          <Json value={job.payload} />
+          {job.result && (<><h3>Result</h3><Json value={job.result} /></>)}
+        </>
+      )}
+
+      <h3>Log</h3>
+      <ol className="logs">
+        {(logs ?? []).map((entry) => (
+          <li key={entry.id} className={`log-${entry.level}`}>
+            <span className="muted">{formatTime(entry.created_at)}</span>
+            <span className="log-level">{entry.level}</span>
+            <span>{entry.message}</span>
+            {entry.metadata?.error && <div className="log-meta">{entry.metadata.error}</div>}
+          </li>
+        ))}
+      </ol>
+    </aside>
+  );
+}
