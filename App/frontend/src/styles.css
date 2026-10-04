@@ -136,6 +136,12 @@ tbody tr.selected { background: color-mix(in srgb, var(--accent) 12%, transparen
 
 .progress { display: inline-block; vertical-align: middle; width: 80px; height: 6px; border-radius: 3px; background: var(--border); overflow: hidden; }
 .progress-fill { height: 100%; background: var(--accent); transition: width .3s; }
+.progress-scheduled .progress-fill { background: #7048e8; transition: width .25s linear; }
+.countdown { display: inline-flex; align-items: center; gap: 6px; }
+.runs-at { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.row-action { padding: 2px 10px; font-size: 12px; color: var(--accent); border-color: var(--accent); }
+.row-action:hover { background: var(--accent); color: #fff; }
+.closing { margin-top: 10px; }
 
 /* drawer */
 .drawer {

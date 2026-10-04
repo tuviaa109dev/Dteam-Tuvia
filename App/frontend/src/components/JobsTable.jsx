@@ -7,10 +7,42 @@ const STATUSES = ["", "scheduled", "pending", "processing", "completed", "failed
 const TYPES = ["", "email", "webhook", "report", "batch"];
 const PAGE = 25;
 
-export default function JobsTable({ refreshKey, selectedId, onSelect }) {
+function NextRun({ job, onAction }) {
+  if (job.status === "scheduled") return formatTime(job.run_at);
+  const action =
+    job.status === "failed" ? { label: "Retry", fn: api.retryJob }
+    : ["completed", "cancelled"].includes(job.status) ? { label: "Rerun", fn: api.rerunJob }
+    : null; // pending / processing: about to run or running
+  if (!action) return "—";
+  return (
+    <button
+      className="row-action"
+      onClick={(e) => {
+        e.stopPropagation(); // don't also select the row
+        onAction(action.fn, job);
+      }}
+    >
+      {action.label}
+    </button>
+  );
+}
+
+export default function JobsTable({ refreshKey, selectedId, onSelect, onChanged }) {
   const [status, setStatus] = useState("");
   const [type, setType] = useState("");
   const [offset, setOffset] = useState(0);
+  const [actionError, setActionError] = useState(null);
+
+  const runAction = async (fn, job) => {
+    setActionError(null);
+    try {
+      const result = await fn(job.id);
+      onSelect(result.id); // the retried job, or the new copy for a rerun
+      onChanged();
+    } catch (err) {
+      setActionError(err.message);
+    }
+  };
 
   const { data, error } = usePolling(
     () => api.listJobs({ status, type, limit: PAGE, offset }),
@@ -34,7 +66,7 @@ export default function JobsTable({ refreshKey, selectedId, onSelect }) {
         </div>
       </div>
 
-      {error && <div className="notice notice-error">{error}</div>}
+      {(error || actionError) && <div className="notice notice-error">{error || actionError}</div>}
 
       <div className="table-wrap">
         <table>
@@ -54,7 +86,7 @@ export default function JobsTable({ refreshKey, selectedId, onSelect }) {
                 <td className="num">{job.attempts}/{job.max_attempts}</td>
                 <td><ProgressBar value={job.progress} /></td>
                 <td>{formatTime(job.created_at)}</td>
-                <td>{job.status === "scheduled" ? formatTime(job.run_at) : "—"}</td>
+                <td><NextRun job={job} onAction={runAction} /></td>
               </tr>
             ))}
             {data && items.length === 0 && (

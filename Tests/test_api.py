@@ -125,6 +125,30 @@ def test_retry_endpoint_only_accepts_failed_jobs(client, submit):
     assert "only failed jobs" in response.json()["detail"]
 
 
+def test_rerun_creates_a_copy_of_a_finished_job(client, submit, fetch, worker, queue):
+    original = submit("report", {"report_type": "sales", "format": "csv"}, priority=4, max_attempts=2)
+    assert client.post(f"/jobs/{original['id']}/rerun").status_code == 409  # still pending
+
+    worker.run_once()
+    response = client.post(f"/jobs/{original['id']}/rerun")
+    assert response.status_code == 201
+    copy = response.json()
+
+    assert copy["id"] != original["id"]
+    assert copy["status"] == "pending" and copy["attempts"] == 0
+    assert (copy["type"], copy["payload"], copy["priority"], copy["max_attempts"]) == (
+        "report", original["payload"], 4, 2)
+    assert queue.contains(copy["id"])
+    assert fetch(original["id"])["status"] == "completed"  # original untouched
+    copy_logs = client.get(f"/jobs/{copy['id']}/logs").json()
+    assert copy_logs[0]["metadata"]["rerun_of"] == original["id"]
+
+    cancelled = submit("email")
+    client.post(f"/jobs/{cancelled['id']}/cancel")
+    assert client.post(f"/jobs/{cancelled['id']}/rerun").status_code == 201
+    assert client.post("/jobs/nope/rerun").status_code == 404
+
+
 def test_health_reports_queue_statistics(client, submit):
     submit("email", priority=1)
     submit("email", delay_seconds=300)

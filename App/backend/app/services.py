@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timedelta
 from uuid import uuid4
 
+from pydantic import ValidationError
 from redis.exceptions import RedisError
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -57,7 +58,9 @@ def _find_by_idempotency_key(db: Session, key: str, now: datetime) -> Job | None
     )
 
 
-def submit_job(db: Session, queue: JobQueue, data: JobCreate, cfg: Settings = settings) -> tuple[Job, bool]:
+def submit_job(
+    db: Session, queue: JobQueue, data: JobCreate, cfg: Settings = settings, rerun_of: str | None = None
+) -> tuple[Job, bool]:
     """Create a job. Returns (job, created); created is False for an idempotent replay."""
     now = utcnow()
     key = data.idempotency_key
@@ -99,8 +102,9 @@ def submit_job(db: Session, queue: JobQueue, data: JobCreate, cfg: Settings = se
             key=key, job_id=job.id, created_at=now,
             expires_at=now + timedelta(hours=cfg.idempotency_ttl_hours),
         ))
+    extra = {"rerun_of": rerun_of} if rerun_of else {}
     add_log(db, job.id, LogLevel.INFO, "job submitted", status=status, priority=data.priority,
-            run_at=run_at.isoformat())
+            run_at=run_at.isoformat(), **extra)
     try:
         db.commit()
     except IntegrityError:
@@ -182,6 +186,29 @@ def retry_job(db: Session, queue: JobQueue, job_id: str) -> Job:
     _safe("dlq-remove", job_id, queue.remove_dead_letter, job_id)
     _safe("enqueue", job_id, queue.enqueue, job_id, job.priority)
     log.info("job manually retried", extra={"job_id": job_id})
+    return job
+
+
+RERUNNABLE = (JobStatus.COMPLETED, JobStatus.CANCELLED, JobStatus.FAILED)
+
+
+def rerun_job(db: Session, queue: JobQueue, job_id: str, cfg: Settings = settings) -> Job:
+    """Submit a fresh copy of a finished job (same type, payload, priority, limits).
+    Unlike retry_job, the original job and its result are left untouched."""
+    original = get_job(db, job_id)
+    if original.status not in RERUNNABLE:
+        raise InvalidTransition(f"only completed, cancelled or failed jobs can be rerun (job is {original.status})")
+    try:
+        data = JobCreate(
+            type=original.type, payload=original.payload, priority=original.priority,
+            max_attempts=original.max_attempts, timeout_seconds=original.timeout_seconds,
+        )
+    except ValidationError as exc:
+        raise InvalidTransition(f"job payload is no longer valid: {exc.errors()[0]['msg']}") from None
+    job, _ = submit_job(db, queue, data, cfg, rerun_of=job_id)
+    add_log(db, job_id, LogLevel.INFO, "rerun requested", new_job_id=job.id)
+    db.commit()
+    log.info("job rerun", extra={"job_id": job_id, "new_job_id": job.id})
     return job
 
 

@@ -30,12 +30,17 @@ export default function App() {
         </section>
 
         <section className="card grow">
-          <JobsTable refreshKey={refreshKey} selectedId={selectedId} onSelect={setSelectedId} />
+          <JobsTable refreshKey={refreshKey} selectedId={selectedId} onSelect={setSelectedId} onChanged={bump} />
         </section>
       </main>
 
       {selectedId && (
-        <JobDetail jobId={selectedId} onClose={() => setSelectedId(null)} onChanged={bump} />
+        <JobDetail
+          jobId={selectedId}
+          onClose={() => setSelectedId(null)}
+          onChanged={bump}
+          onRerun={(copy) => setSelectedId(copy.id)}
+        />
       )}
     </div>
   );

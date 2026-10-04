@@ -27,5 +27,6 @@ export const api = {
   submitJob: (job) => request("/jobs", { method: "POST", body: JSON.stringify(job) }),
   cancelJob: (id) => request(`/jobs/${id}/cancel`, { method: "POST" }).then((r) => r.body),
   retryJob: (id) => request(`/jobs/${id}/retry`, { method: "POST" }).then((r) => r.body),
+  rerunJob: (id) => request(`/jobs/${id}/rerun`, { method: "POST" }).then((r) => r.body),
   deadLetter: () => request("/dead-letter").then((r) => r.body),
 };

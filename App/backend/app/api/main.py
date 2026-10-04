@@ -124,6 +124,17 @@ def retry_job(job_id: str, db: DB, queue: Queue):
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
 
 
+@app.post("/jobs/{job_id}/rerun", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+def rerun_job(job_id: str, db: DB, queue: Queue):
+    """Submit a new job with the same type, payload and settings as a finished one."""
+    try:
+        return services.rerun_job(db, queue, job_id)
+    except services.JobNotFound:
+        raise _not_found(job_id) from None
+    except services.InvalidTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+
+
 @app.get("/dead-letter", response_model=list[JobOut])
 def dead_letter_queue(db: DB, queue: Queue, limit: Annotated[int, Query(ge=1, le=500)] = 100):
     return services.dead_letter_jobs(db, queue, limit)
