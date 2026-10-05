@@ -13,7 +13,10 @@ from app.config import settings
 from app.db import get_db
 from app.logging_config import configure_logging
 from app.queue import JobQueue
-from app.schemas import HealthOut, JobCreate, JobListOut, JobLogOut, JobOut, JobType, StatusName
+from app.schemas import (
+    DeadLetterListOut, DeadLetterOut, HealthOut, JobCreate, JobListOut, JobLogOut, JobOut, JobType,
+    RequeueIn, StatusName,
+)
 
 log = logging.getLogger("jobq.api")
 
@@ -58,7 +61,12 @@ DB = Annotated[Session, Depends(get_db)]
 Queue = Annotated[JobQueue, Depends(get_queue)]
 
 
-def _not_found(job_id: str) -> HTTPException:
+def _not_found(job_id: str, exc: Exception | None = None) -> HTTPException:
+    if isinstance(exc, services.JobDeadLettered):
+        return HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"job {job_id} was moved to the dead letter queue (corrupted data): see /dead-letter/{job_id}",
+        )
     return HTTPException(status.HTTP_404_NOT_FOUND, f"job {job_id} not found")
 
 
@@ -92,24 +100,24 @@ def list_jobs(
 def get_job(job_id: str, db: DB):
     try:
         return services.get_job(db, job_id)
-    except services.JobNotFound:
-        raise _not_found(job_id) from None
+    except services.JobNotFound as exc:
+        raise _not_found(job_id, exc) from None
 
 
 @app.get("/jobs/{job_id}/logs", response_model=list[JobLogOut])
 def get_job_logs(job_id: str, db: DB):
     try:
         return services.get_logs(db, job_id)
-    except services.JobNotFound:
-        raise _not_found(job_id) from None
+    except services.JobNotFound as exc:
+        raise _not_found(job_id, exc) from None
 
 
 @app.post("/jobs/{job_id}/cancel", response_model=JobOut)
 def cancel_job(job_id: str, db: DB, queue: Queue):
     try:
         return services.cancel_job(db, queue, job_id)
-    except services.JobNotFound:
-        raise _not_found(job_id) from None
+    except services.JobNotFound as exc:
+        raise _not_found(job_id, exc) from None
     except services.InvalidTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
 
@@ -118,8 +126,8 @@ def cancel_job(job_id: str, db: DB, queue: Queue):
 def retry_job(job_id: str, db: DB, queue: Queue):
     try:
         return services.retry_job(db, queue, job_id)
-    except services.JobNotFound:
-        raise _not_found(job_id) from None
+    except services.JobNotFound as exc:
+        raise _not_found(job_id, exc) from None
     except services.InvalidTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
 
@@ -129,18 +137,89 @@ def rerun_job(job_id: str, db: DB, queue: Queue):
     """Submit a new job with the same type, payload and settings as a finished one."""
     try:
         return services.rerun_job(db, queue, job_id)
-    except services.JobNotFound:
-        raise _not_found(job_id) from None
+    except services.JobNotFound as exc:
+        raise _not_found(job_id, exc) from None
     except services.InvalidTransition as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
 
 
-@app.post("/dev/reset", responses={403: {"description": "Dev endpoints are disabled"}})
-def dev_reset(db: DB, queue: Queue):
-    """Delete all jobs, logs, idempotency keys and queued work. Requires DEV_ENDPOINTS=true."""
+# ---- dead letter queue: jobs with corrupted data, kept in their own table for inspection ----
+
+
+def _dead_letter_not_found(job_id: str) -> HTTPException:
+    return HTTPException(status.HTTP_404_NOT_FOUND, f"dead letter {job_id} not found")
+
+
+@app.get("/dead-letter", response_model=DeadLetterListOut)
+def list_dead_letters(
+    db: DB,
+    type_: Annotated[str | None, Query(alias="type")] = None,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+):
+    items, total = services.list_dead_letters(db, type_, limit, offset)
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@app.get("/dead-letter/{job_id}", response_model=DeadLetterOut)
+def get_dead_letter(job_id: str, db: DB):
+    try:
+        return services.get_dead_letter(db, job_id)
+    except services.DeadLetterNotFound:
+        raise _dead_letter_not_found(job_id) from None
+
+
+@app.post("/dead-letter/{job_id}/requeue", response_model=JobOut, status_code=status.HTTP_201_CREATED)
+def requeue_dead_letter(job_id: str, db: DB, queue: Queue, body: RequeueIn | None = None):
+    """Move a dead letter back into the jobs table as pending. Send `{"payload": {...}}` to fix the
+    corrupted data first. 409 if the payload is still invalid or the job type is unknown."""
+    try:
+        return services.requeue_dead_letter(db, queue, job_id, body.payload if body else None)
+    except services.DeadLetterNotFound:
+        raise _dead_letter_not_found(job_id) from None
+    except services.InvalidTransition as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from None
+
+
+@app.delete("/dead-letter/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+def discard_dead_letter(job_id: str, db: DB):
+    try:
+        services.discard_dead_letter(db, job_id)
+    except services.DeadLetterNotFound:
+        raise _dead_letter_not_found(job_id) from None
+
+
+@app.delete("/dead-letter")
+def purge_dead_letters(db: DB, type_: Annotated[str | None, Query(alias="type")] = None):
+    """Discard every dead letter (optionally only one job type)."""
+    return {"deleted": services.purge_dead_letters(db, type_)}
+
+
+# ---- dev tools (DEV_ENDPOINTS=true only) -----------------------------------------------------
+
+
+def _require_dev_endpoints() -> None:
     if not settings.dev_endpoints:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "dev endpoints are disabled (set DEV_ENDPOINTS=true)")
-    return {"deleted_jobs": services.reset_all_data(db, queue)}
+
+
+@app.post("/dev/reset", responses={403: {"description": "Dev endpoints are disabled"}})
+def dev_reset(db: DB, queue: Queue):
+    """Delete all jobs, logs, idempotency keys, dead letters and queued work."""
+    _require_dev_endpoints()
+    return services.reset_all_data(db, queue)
+
+
+@app.post(
+    "/dev/corrupted-jobs",
+    response_model=list[JobOut],
+    status_code=status.HTTP_201_CREATED,
+    responses={403: {"description": "Dev endpoints are disabled"}},
+)
+def dev_corrupted_jobs(db: DB, queue: Queue, count: Annotated[int, Query(ge=1, le=50)] = 3):
+    """Inject pending jobs with corrupted data, bypassing validation. Workers dead-letter them."""
+    _require_dev_endpoints()
+    return services.seed_corrupted_jobs(db, queue, count)
 
 
 @app.get("/health", response_model=HealthOut, responses={503: {"model": HealthOut}})

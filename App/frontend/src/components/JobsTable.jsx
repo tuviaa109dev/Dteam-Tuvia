@@ -1,10 +1,17 @@
 import { useEffect, useState } from "react";
 import { api } from "../api.js";
+import { statusLabel } from "../statusLabels.js";
 import { usePolling } from "../usePolling.js";
 import ConfirmDialog from "./ConfirmDialog.jsx";
+import DeadLetterTable from "./DeadLetterTable.jsx";
+import Pager from "./Pager.jsx";
 import StatusBadge, { Countdown, ProgressBar, formatTime } from "./StatusBadge.jsx";
 
 const STATUSES = ["", "scheduled", "pending", "processing", "completed", "failed", "cancelled"];
+const TABS = [
+  { id: "jobs", label: "Jobs" },
+  { id: "dlq", label: "DLQ - dev", title: "Dead letter queue: jobs with corrupted data, for developers to inspect" },
+];
 const TYPES = ["", "email", "webhook", "report", "batch"];
 const PAGE = 25;
 const COLUMNS = 9;
@@ -57,8 +64,7 @@ async function fetchAllIds(status, type) {
   }
 }
 
-export default function JobsTable({ refreshKey, selectedId, onSelect, onChanged, status, onStatusChange }) {
-  const [type, setType] = useState("");
+function JobList({ status, type, refreshKey, selectedId, onSelect, onChanged, onTotal }) {
   const [offset, setOffset] = useState(0);
   const [actionError, setActionError] = useState(null);
   const [bulkConfirm, setBulkConfirm] = useState(false);
@@ -74,6 +80,8 @@ export default function JobsTable({ refreshKey, selectedId, onSelect, onChanged,
   const items = data?.items ?? [];
   const total = data?.total ?? 0;
   const bulk = ACTIONS[status]?.bulkLabel ? ACTIONS[status] : null;
+
+  useEffect(() => onTotal(data ? total : null), [data, total, onTotal]);
 
   const runAction = async (fn, job) => {
     setActionError(null);
@@ -109,24 +117,6 @@ export default function JobsTable({ refreshKey, selectedId, onSelect, onChanged,
 
   return (
     <>
-      <div className="table-head">
-        <h2>Jobs {data && <span className="muted">({total})</span>}</h2>
-        <div className="filters">
-          <select
-            className={`status-select ${status ? `status-${status}` : ""}`}
-            value={status}
-            onChange={(e) => onStatusChange(e.target.value)}
-          >
-            {STATUSES.map((s) => (
-              <option key={s} value={s} className={s ? `status-${s}` : "status-all"}>{s || "all statuses"}</option>
-            ))}
-          </select>
-          <select value={type} onChange={(e) => setType(e.target.value)}>
-            {TYPES.map((t) => <option key={t} value={t}>{t || "all types"}</option>)}
-          </select>
-        </div>
-      </div>
-
       {(error || actionError) && <div className="notice notice-error">{error || actionError}</div>}
 
       <div className="table-wrap">
@@ -174,25 +164,90 @@ export default function JobsTable({ refreshKey, selectedId, onSelect, onChanged,
         </table>
       </div>
 
-      {total > PAGE && (
-        <div className="pager">
-          <button disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - PAGE))}>Previous</button>
-          <span className="muted">{offset + 1}–{Math.min(offset + PAGE, total)} of {total}</span>
-          <button disabled={offset + PAGE >= total} onClick={() => setOffset(offset + PAGE)}>Next</button>
-        </div>
-      )}
+      <Pager offset={offset} total={total} page={PAGE} onChange={setOffset} />
 
       {bulkConfirm && bulk && (
         <ConfirmDialog
           title={`${bulk.bulkLabel}?`}
           message={
             bulk.verb === "retry"
-              ? `Are you sure you want to retry all ${total} failed ${type ? `${type} ` : ""}job${total === 1 ? "" : "s"}? Each one goes back to pending with a fresh set of attempts.`
+              ? `Are you sure you want to retry all ${total} ${statusLabel("failed")} ${type ? `${type} ` : ""}job${total === 1 ? "" : "s"}? Each one goes back to pending with a fresh set of attempts.`
               : `Are you sure you want to rerun all ${total} cancelled ${type ? `${type} ` : ""}job${total === 1 ? "" : "s"}? A new copy of each one will be added to the list.`
           }
           confirmLabel={`Yes, ${bulk.verb} all`}
           onConfirm={runBulk}
           onCancel={() => setBulkConfirm(false)}
+        />
+      )}
+    </>
+  );
+}
+
+/** The jobs panel: two tabs, "Jobs" (the jobs table with status/type filters) and
+ *  "DLQ - dev" (the dead letter queue, a separate table, filterable by type only). */
+export default function JobsTable({
+  tab, onTabChange, refreshKey, selectedId, onSelect, onChanged, status, onStatusChange,
+  selectedDeadLetterId, onSelectDeadLetter,
+}) {
+  const [type, setType] = useState("");
+  const [total, setTotal] = useState(null);
+  const deadLetters = tab === "dlq";
+
+  return (
+    <>
+      <div className="table-head">
+        <div className="tabs" role="tablist">
+          {TABS.map(({ id, label, title }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={tab === id}
+              title={title}
+              className={`tab ${tab === id ? "active" : ""} ${id === "dlq" ? "tab-dlq" : ""}`}
+              onClick={() => onTabChange(id)}
+            >
+              {label}
+              {tab === id && total != null && <span className="tab-count">{total}</span>}
+            </button>
+          ))}
+        </div>
+        <div className="filters">
+          {!deadLetters && (
+            <select
+              className={`status-select ${status ? `status-${status}` : ""}`}
+              value={status}
+              onChange={(e) => onStatusChange(e.target.value)}
+            >
+              {STATUSES.map((s) => (
+                <option key={s} value={s} className={s ? `status-${s}` : "status-all"}>{s ? statusLabel(s) : "all statuses"}</option>
+              ))}
+            </select>
+          )}
+          <select value={type} onChange={(e) => setType(e.target.value)}>
+            {TYPES.map((t) => <option key={t} value={t}>{t || "all types"}</option>)}
+          </select>
+        </div>
+      </div>
+
+      {deadLetters ? (
+        <DeadLetterTable
+          type={type}
+          refreshKey={refreshKey}
+          selectedId={selectedDeadLetterId}
+          onSelect={onSelectDeadLetter}
+          onChanged={onChanged}
+          onTotal={setTotal}
+        />
+      ) : (
+        <JobList
+          status={status}
+          type={type}
+          refreshKey={refreshKey}
+          selectedId={selectedId}
+          onSelect={onSelect}
+          onChanged={onChanged}
+          onTotal={setTotal}
         />
       )}
     </>

@@ -135,9 +135,9 @@ class Worker:
 
     def _fail(self, job_id: str, token: str, error: str, error_type: str, retryable: bool) -> None:
         with self.session_factory() as db:
-            status = services.fail_job(db, self.queue, job_id, token, error, error_type, retryable, self.cfg)
-        level = logging.ERROR if status == "failed" else logging.WARNING
-        log.log(level, "job attempt failed", extra={"error": error, "error_type": error_type, "new_status": status})
+            outcome = services.fail_job(db, self.queue, job_id, token, error, error_type, retryable, self.cfg)
+        level = logging.ERROR if outcome in ("failed", services.DEAD_LETTER) else logging.WARNING
+        log.log(level, "job attempt failed", extra={"error": error, "error_type": error_type, "outcome": outcome})
 
     def _report_progress(self, job_id: str, token: str, pct: int, ctx: JobContext) -> None:
         with self.session_factory() as db:

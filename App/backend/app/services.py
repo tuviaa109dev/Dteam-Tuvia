@@ -14,16 +14,25 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import Settings, settings
-from app.models import IdempotencyKey, Job, JobLog, JobStatus, LogLevel, utcnow
+from app.models import DeadLetterJob, IdempotencyKey, Job, JobLog, JobStatus, LogLevel, utcnow
 from app.queue import JobQueue
-from app.schemas import JobCreate
+from app.schemas import PAYLOAD_MODELS, JobCreate
 
 log = logging.getLogger("jobq.service")
 
 CANCELLABLE = (JobStatus.PENDING, JobStatus.SCHEDULED)
+DEAD_LETTER = "dead_letter"  # outcome of a non-retryable failure (the job leaves the jobs table)
 
 
 class JobNotFound(Exception):
+    pass
+
+
+class JobDeadLettered(JobNotFound):
+    """The job no longer lives in `jobs` because it was moved to the dead letter queue."""
+
+
+class DeadLetterNotFound(Exception):
     pass
 
 
@@ -124,6 +133,8 @@ def submit_job(
 def get_job(db: Session, job_id: str) -> Job:
     job = db.get(Job, job_id)
     if job is None:
+        if db.get(DeadLetterJob, job_id) is not None:
+            raise JobDeadLettered(job_id)
         raise JobNotFound(job_id)
     return job
 
@@ -165,7 +176,7 @@ def cancel_job(db: Session, queue: JobQueue, job_id: str) -> Job:
 
 
 def retry_job(db: Session, queue: JobQueue, job_id: str) -> Job:
-    """Manual retry of a permanently failed job: FAILED -> PENDING with a fresh attempt budget."""
+    """Manual retry of a failed job: FAILED -> PENDING with a fresh attempt budget."""
     now = utcnow()
     result = db.execute(
         update(Job)
@@ -173,7 +184,7 @@ def retry_job(db: Session, queue: JobQueue, job_id: str) -> Job:
         .values(
             status=JobStatus.PENDING, attempts=0, progress=0, run_at=now,
             error=None, error_type=None, result=None,
-            started_at=None, completed_at=None, dead_lettered_at=None, worker_id=None,
+            started_at=None, completed_at=None, worker_id=None,
         )
     )
     if result.rowcount != 1:
@@ -183,7 +194,6 @@ def retry_job(db: Session, queue: JobQueue, job_id: str) -> Job:
     add_log(db, job_id, LogLevel.INFO, "manual retry requested")
     db.commit()
     job = _reload(db, job_id)
-    _safe("dlq-remove", job_id, queue.remove_dead_letter, job_id)
     _safe("enqueue", job_id, queue.enqueue, job_id, job.priority)
     log.info("job manually retried", extra={"job_id": job_id})
     return job
@@ -212,19 +222,155 @@ def rerun_job(db: Session, queue: JobQueue, job_id: str, cfg: Settings = setting
     return job
 
 
-def reset_all_data(db: Session, queue: JobQueue) -> int:
-    """Dev only: delete every job, log and idempotency key, and empty the Redis queue/DLQ.
-    Workers mid-job simply lose their lease (their fenced writes match no row) and move on."""
-    deleted = db.scalar(select(func.count()).select_from(Job)) or 0
+# ---- dead letter queue -----------------------------------------------------------------------
+
+
+def _move_to_dead_letter(db: Session, job: Job, now: datetime) -> None:
+    """Snapshot a locked job (with its log history) into dead_letter_jobs and delete it from
+    jobs. Runs inside the caller's transaction, so the job is never in both tables or neither."""
+    history = [
+        {"level": entry.level, "message": entry.message, "metadata": entry.metadata_,
+         "created_at": entry.created_at.isoformat()}
+        for entry in db.scalars(select(JobLog).where(JobLog.job_id == job.id).order_by(JobLog.id))
+    ]
+    history.append({
+        "level": LogLevel.ERROR,
+        "message": "corrupted data: moved to dead letter queue",
+        "metadata": {"error": job.error, "error_type": job.error_type, "attempt": job.attempts},
+        "created_at": now.isoformat(),
+    })
+    db.add(DeadLetterJob(
+        id=job.id, type=job.type, payload=job.payload, priority=job.priority,
+        attempts=job.attempts, max_attempts=job.max_attempts, timeout_seconds=job.timeout_seconds,
+        error=job.error or "", error_type=job.error_type or "", idempotency_key=job.idempotency_key,
+        worker_id=job.worker_id, created_at=job.created_at, dead_lettered_at=now, logs=history,
+    ))
+    db.delete(job)  # its job_logs and idempotency key go with it (cascade)
+
+
+def list_dead_letters(
+    db: Session, job_type: str | None = None, limit: int = 50, offset: int = 0
+) -> tuple[list[DeadLetterJob], int]:
+    query = select(DeadLetterJob)
+    if job_type:
+        query = query.where(DeadLetterJob.type == job_type)
+    total = db.scalar(select(func.count()).select_from(query.subquery()))
+    items = db.scalars(
+        query.order_by(DeadLetterJob.dead_lettered_at.desc(), DeadLetterJob.id).offset(offset).limit(limit)
+    ).all()
+    return list(items), int(total or 0)
+
+
+def get_dead_letter(db: Session, job_id: str) -> DeadLetterJob:
+    entry = db.get(DeadLetterJob, job_id)
+    if entry is None:
+        raise DeadLetterNotFound(job_id)
+    return entry
+
+
+def requeue_dead_letter(
+    db: Session, queue: JobQueue, job_id: str, payload: dict | None = None, cfg: Settings = settings
+) -> Job:
+    """Send a dead letter back to the jobs table as PENDING, under its original id and with its
+    log history restored. Pass `payload` to fix the corrupted data first. Refused (409) while
+    the payload is still invalid for its type: requeueing it unchanged would just fail again."""
+    entry = get_dead_letter(db, job_id)
+    model = PAYLOAD_MODELS.get(entry.type)
+    if model is None:
+        raise InvalidTransition(f"unknown job type '{entry.type}': this job can only be discarded")
+    try:
+        fixed = model.model_validate(entry.payload if payload is None else payload).model_dump()
+    except ValidationError as exc:
+        problems = "; ".join(f"{'.'.join(map(str, e['loc'])) or 'payload'}: {e['msg']}" for e in exc.errors())
+        raise InvalidTransition(f"payload is still invalid for '{entry.type}': {problems}") from None
+
+    now = utcnow()
+    db.add(Job(
+        id=entry.id, type=entry.type, payload=fixed, status=JobStatus.PENDING, priority=entry.priority,
+        attempts=0, max_attempts=entry.max_attempts, timeout_seconds=entry.timeout_seconds, progress=0,
+        run_at=now, created_at=entry.created_at, updated_at=now, idempotency_key=entry.idempotency_key,
+    ))
+    db.flush()  # the job row must exist before its restored logs reference it
+    for item in entry.logs:
+        db.add(JobLog(job_id=entry.id, level=item["level"], message=item["message"],
+                      metadata_=item.get("metadata") or {}, created_at=datetime.fromisoformat(item["created_at"])))
+    add_log(db, entry.id, LogLevel.INFO, "requeued from dead letter queue", payload_fixed=payload is not None)
+    db.delete(entry)
+    db.commit()
+    log.info("dead letter requeued", extra={"job_id": job_id, "payload_fixed": payload is not None})
+    _safe("enqueue", job_id, queue.enqueue, job_id, entry.priority)
+    return _reload(db, job_id)
+
+
+def discard_dead_letter(db: Session, job_id: str) -> None:
+    entry = get_dead_letter(db, job_id)
+    db.delete(entry)
+    db.commit()
+    log.info("dead letter discarded", extra={"job_id": job_id})
+
+
+def purge_dead_letters(db: Session, job_type: str | None = None) -> int:
+    query = delete(DeadLetterJob)
+    if job_type:
+        query = query.where(DeadLetterJob.type == job_type)
+    deleted = db.execute(query).rowcount
+    db.commit()
+    log.warning("dead letters purged", extra={"count": deleted, "job_type": job_type})
+    return deleted
+
+
+# ---- dev tools -------------------------------------------------------------------------------
+
+# Payloads that can never be processed. The API would reject them, so seed_corrupted_jobs writes
+# them straight to the database, the way data can get damaged after it was accepted (a manual DB
+# edit, a buggy migration, a producer on an older schema...).
+CORRUPTED_SAMPLES: list[tuple[str, dict]] = [
+    ("email", {"subject": "Invoice #1042"}),                                   # recipient missing
+    ("webhook", {"url": "ftp//partner.example.com/hook", "failure_rate": 0}),  # malformed URL
+    ("batch", {"items": "row-1,row-2,row-3", "item_delay_ms": 100}),           # items is not a list
+    ("fax", {"number": "+1-555-0100", "pages": 3}),                            # unknown job type
+    ("report", {"report_type": "", "format": "docx"}),                         # empty type, bad format
+]
+
+
+def seed_corrupted_jobs(db: Session, queue: JobQueue, count: int = 3, cfg: Settings = settings) -> list[Job]:
+    """Dev only: insert pending jobs with corrupted data, bypassing API validation. Workers send
+    each of them to the dead letter queue on their first attempt."""
+    now = utcnow()
+    jobs = []
+    for index in range(count):
+        job_type, payload = CORRUPTED_SAMPLES[index % len(CORRUPTED_SAMPLES)]
+        job = Job(
+            id=str(uuid4()), type=job_type, payload=payload, status=JobStatus.PENDING, priority=0,
+            attempts=0, max_attempts=cfg.default_max_attempts, timeout_seconds=cfg.default_job_timeout,
+            progress=0, run_at=now, created_at=now, updated_at=now,
+        )
+        db.add(job)
+        db.flush()
+        add_log(db, job.id, LogLevel.WARNING, "dev: corrupted job injected (bypassed API validation)")
+        jobs.append(job)
+    db.commit()
+    for job in jobs:
+        _safe("enqueue", job.id, queue.enqueue, job.id, job.priority)
+    return jobs
+
+
+def reset_all_data(db: Session, queue: JobQueue) -> dict[str, int]:
+    """Dev only: delete every job, log, idempotency key and dead letter, and empty the Redis
+    queue. Workers mid-job simply lose their lease (their fenced writes match no row)."""
+    counts = {
+        "deleted_jobs": db.scalar(select(func.count()).select_from(Job)) or 0,
+        "deleted_dead_letters": db.scalar(select(func.count()).select_from(DeadLetterJob)) or 0,
+    }
     if db.get_bind().dialect.name == "postgresql":
-        db.execute(text("TRUNCATE job_logs, idempotency_keys, jobs RESTART IDENTITY"))
+        db.execute(text("TRUNCATE job_logs, idempotency_keys, jobs, dead_letter_jobs RESTART IDENTITY"))
     else:
-        for model in (JobLog, IdempotencyKey, Job):
+        for model in (JobLog, IdempotencyKey, Job, DeadLetterJob):
             db.execute(delete(model))
     db.commit()
     queue.reset()
-    log.warning("all job data reset", extra={"jobs_deleted": deleted})
-    return deleted
+    log.warning("all job data reset", extra=counts)
+    return counts
 
 
 def queue_stats(db: Session, queue: JobQueue) -> dict:
@@ -237,7 +383,7 @@ def queue_stats(db: Session, queue: JobQueue) -> dict:
             "ready": queue.depth(),
             "scheduled": counts[JobStatus.SCHEDULED],
             "processing": counts[JobStatus.PROCESSING],
-            "dead_letter": queue.dlq_size(),
+            "dead_letter": db.scalar(select(func.count()).select_from(DeadLetterJob)) or 0,
             "oldest_pending_age_seconds": round((utcnow() - oldest).total_seconds(), 3) if oldest else None,
             "poison_messages_dropped": queue.stats().get("poison_dropped", 0),
         },
@@ -320,33 +466,39 @@ def complete_job(db: Session, job_id: str, token: str, result: dict) -> bool:
 
 def _apply_failure(
     db: Session, job: Job, error: str, error_type: str, retryable: bool, now: datetime, cfg: Settings
-) -> bool:
-    """Mutate a locked PROCESSING job after a failed attempt. Returns True if dead-lettered."""
+) -> str:
+    """Handle a failed attempt on a locked PROCESSING job. Returns the outcome:
+
+    - SCHEDULED:   retryable, attempts left -> retry after backoff
+    - FAILED:      retryable, attempts used up -> failed (temporarily); can be retried manually
+    - DEAD_LETTER: not retryable (corrupted data) -> moved to the dead letter queue
+    """
     job.error = error[:4000]
     job.error_type = error_type
     job.lease_token = None
     job.lease_expires_at = None
-    if retryable and job.attempts < job.max_attempts:
+    if not retryable:
+        _move_to_dead_letter(db, job, now)
+        return DEAD_LETTER
+    if job.attempts < job.max_attempts:
         delay = cfg.retry_delay(job.attempts)
         job.status = JobStatus.SCHEDULED
         job.run_at = now + timedelta(seconds=delay)
         add_log(db, job.id, LogLevel.WARNING, f"attempt {job.attempts} failed; retrying in {delay:g}s",
                 error=job.error, error_type=error_type, attempt=job.attempts, retry_at=job.run_at.isoformat())
-        return False
+        return JobStatus.SCHEDULED
     job.status = JobStatus.FAILED
     job.completed_at = now
-    job.dead_lettered_at = now
-    reason = "max attempts reached" if retryable else "non-retryable error"
-    add_log(db, job.id, LogLevel.ERROR, f"job failed permanently ({reason}); moved to dead letter queue",
+    add_log(db, job.id, LogLevel.ERROR, f"failed after {job.attempts} attempts (temporary failure; can be retried)",
             error=job.error, error_type=error_type, attempt=job.attempts)
-    return True
+    return JobStatus.FAILED
 
 
 def fail_job(
     db: Session, queue: JobQueue, job_id: str, token: str, error: str, error_type: str,
     retryable: bool = True, cfg: Settings = settings,
 ) -> str | None:
-    """Record a failed attempt. Returns the new status, or None if the lease was already lost."""
+    """Record a failed attempt. Returns the outcome, or None if the lease was already lost."""
     job = db.scalar(
         select(Job)
         .where(Job.id == job_id, Job.lease_token == token, Job.status == JobStatus.PROCESSING)
@@ -355,12 +507,9 @@ def fail_job(
     if job is None:
         db.rollback()
         return None
-    dead = _apply_failure(db, job, error, error_type, retryable, utcnow(), cfg)
-    status = job.status
+    outcome = _apply_failure(db, job, error, error_type, retryable, utcnow(), cfg)
     db.commit()
-    if dead:
-        _safe("dead-letter", job_id, queue.dead_letter, job_id)
-    return status
+    return outcome
 
 
 # ---- maintenance (scheduler, reaper, reconciler) ---------------------------------------------
@@ -404,16 +553,13 @@ def reap_expired_leases(
     if not jobs:
         db.rollback()
         return 0
-    dead_lettered = []
     for job in jobs:
         log.warning("lease expired; recovering job",
                     extra={"job_id": job.id, "worker_id": job.worker_id, "attempt": job.attempts})
-        if _apply_failure(db, job, f"lease expired: worker {job.worker_id} stopped heartbeating",
-                          "LeaseExpired", True, now, cfg):
-            dead_lettered.append(job.id)
+        # A crash is not proof of bad data, so this is always a retryable failure (never DLQ).
+        _apply_failure(db, job, f"lease expired: worker {job.worker_id} stopped heartbeating",
+                       "LeaseExpired", True, now, cfg)
     db.commit()
-    for job_id in dead_lettered:
-        _safe("dead-letter", job_id, queue.dead_letter, job_id)
     return len(jobs)
 
 

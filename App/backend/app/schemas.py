@@ -112,7 +112,40 @@ class JobOut(BaseModel):
     started_at: datetime | None
     completed_at: datetime | None
     worker_id: str | None
-    dead_lettered_at: datetime | None
+
+
+class DeadLetterOut(BaseModel):
+    """A job in the dead letter queue: its last state, the error and its full log history."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    type: str
+    payload: Any
+    priority: int
+    attempts: int
+    max_attempts: int
+    timeout_seconds: int
+    error: str
+    error_type: str
+    idempotency_key: str | None
+    worker_id: str | None
+    created_at: datetime
+    dead_lettered_at: datetime
+    logs: list[dict[str, Any]]
+
+
+class DeadLetterListOut(BaseModel):
+    items: list[DeadLetterOut]
+    total: int
+    limit: int
+    offset: int
+
+
+class RequeueIn(BaseModel):
+    """Optionally replace the payload (fix the corrupted data) before sending the job back."""
+
+    payload: dict[str, Any] | None = None
 
 
 class JobLogOut(BaseModel):

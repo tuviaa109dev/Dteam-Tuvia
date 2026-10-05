@@ -154,10 +154,12 @@ def test_dev_reset_wipes_everything_only_when_enabled(client, submit, worker, qu
 
     submit("email", idempotency_key="k")
     submit("email", delay_seconds=60)
-    failing = submit("webhook", {"url": "https://x.io", "failure_rate": 1.0}, max_attempts=1)
+    submit("webhook", {"url": "https://x.io", "failure_rate": 1.0}, max_attempts=1)
+    monkeypatch.setattr(settings, "dev_endpoints", True)
+    assert client.post("/dev/corrupted-jobs", params={"count": 1}).status_code == 201
     while worker.run_once():
         pass
-    assert queue.dead_letters() == [failing["id"]]
+    assert client.get("/dead-letter").json()["total"] == 1
 
     monkeypatch.setattr(settings, "dev_endpoints", False)
     assert client.post("/dev/reset").status_code == 403
@@ -165,9 +167,11 @@ def test_dev_reset_wipes_everything_only_when_enabled(client, submit, worker, qu
 
     monkeypatch.setattr(settings, "dev_endpoints", True)
     response = client.post("/dev/reset")
-    assert response.status_code == 200 and response.json() == {"deleted_jobs": 3}
+    assert response.status_code == 200
+    assert response.json() == {"deleted_jobs": 3, "deleted_dead_letters": 1}
     assert client.get("/jobs").json()["total"] == 0
-    assert queue.depth() == 0 and queue.dlq_size() == 0
+    assert client.get("/dead-letter").json()["total"] == 0
+    assert queue.depth() == 0
     # The idempotency key is gone too, so it can create a new job.
     assert submit("email", idempotency_key="k")["status"] == "pending"
 

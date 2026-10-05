@@ -1,16 +1,11 @@
 import { api } from "../api.js";
+import { capitalize, statusLabel } from "../statusLabels.js";
 import { usePolling } from "../usePolling.js";
 
-/** Stat tiles that filter the jobs table. `status: ""` means "all statuses". */
-const STATUS_STATS = [
-  { label: "Total jobs", status: "" },
-  { label: "Scheduled", status: "scheduled" },
-  { label: "Pending", status: "pending" },
-  { label: "Processing", status: "processing" },
-  { label: "Completed", status: "completed" },
-  { label: "Failed", status: "failed" },
-  { label: "Cancelled", status: "cancelled" },
-];
+/** Stat tiles that filter the jobs table. `""` means "all statuses". */
+const STATUS_STATS = ["", "scheduled", "pending", "processing", "completed", "failed", "cancelled", "dead_letter"].map(
+  (status) => ({ status, label: status ? capitalize(statusLabel(status)) : "Total jobs" })
+);
 
 function Stat({ label, value, status, active, onClick }) {
   const tone = status ? `stat-${status}` : "";
@@ -54,7 +49,7 @@ export default function HealthPanel({ refreshKey, activeStatus, onSelectStatus }
             key={label}
             label={label}
             status={status}
-            value={status ? counts?.[status] : total}
+            value={status === "dead_letter" ? q?.dead_letter : status ? counts?.[status] : total}
             active={activeStatus === status}
             onClick={() => onSelectStatus(status)}
           />

@@ -16,6 +16,7 @@
   --st-completed: #2f9e44;
   --st-failed: #e03131;
   --st-cancelled: #6b7280;
+  --st-dead_letter: #8f1d1d;  /* dark red: corrupted data */
   --active-bg: #e7f5ff;
   --active-border: #74c0fc;
   color-scheme: light;
@@ -36,6 +37,7 @@
     --st-scheduled: #9775fa;
     --st-pending: #4dabf7;
     --st-cancelled: #8b949e;
+    --st-dead_letter: #d9534f;
     --active-bg: rgba(116, 192, 252, .16);
     --active-border: #4dabf7;
     color-scheme: dark;
@@ -102,6 +104,7 @@ h3 { font-size: 13px; margin: 16px 0 6px; text-transform: uppercase; letter-spac
 .stat-completed .stat-value { color: var(--st-completed); }
 .stat-failed .stat-value { color: var(--st-failed); }
 .stat-cancelled .stat-value { color: var(--st-cancelled); }
+.stat-dead_letter .stat-value { color: var(--st-dead_letter); }
 
 /* form */
 .form { display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
@@ -156,6 +159,8 @@ input[type="range"] { padding: 0; accent-color: var(--accent); }
 .notice-ok { border-color: var(--good); color: var(--good); }
 .notice-info { border-color: var(--info); color: var(--info); }
 .notice-error { border-color: var(--bad); color: var(--bad); }
+.notice-dead { border-color: var(--st-dead_letter); color: var(--st-dead_letter); }
+.notice-dead p { margin: 0 0 8px; }
 
 /* table */
 .table-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
@@ -177,6 +182,7 @@ tbody tr.selected { background: color-mix(in srgb, var(--accent) 12%, transparen
 .badge-completed { color: var(--st-completed); }
 .badge-failed { color: var(--st-failed); }
 .badge-cancelled { color: var(--st-cancelled); }
+.badge-dead_letter { color: var(--st-dead_letter); }
 
 /* status filter dropdown: the closed select and each option take their status color */
 .status-select.status-scheduled, option.status-scheduled { color: var(--st-scheduled); }
@@ -185,9 +191,11 @@ tbody tr.selected { background: color-mix(in srgb, var(--accent) 12%, transparen
 .status-select.status-completed, option.status-completed { color: var(--st-completed); }
 .status-select.status-failed, option.status-failed { color: var(--st-failed); }
 .status-select.status-cancelled, option.status-cancelled { color: var(--st-cancelled); }
+.status-select.status-dead_letter, option.status-dead_letter { color: var(--st-dead_letter); }
 option.status-all { color: var(--text); }
 .status-select.status-scheduled, .status-select.status-pending, .status-select.status-processing,
-.status-select.status-completed, .status-select.status-failed, .status-select.status-cancelled {
+.status-select.status-completed, .status-select.status-failed, .status-select.status-cancelled,
+.status-select.status-dead_letter {
   border-color: currentColor; font-weight: 500;
 }
 
@@ -204,6 +212,8 @@ tfoot td { border-bottom: none; padding-top: 10px; }
 .runs-at { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .row-action { padding: 2px 10px; font-size: 12px; color: var(--accent); border-color: var(--accent); }
 .row-action:hover { background: var(--accent); color: #fff; }
+.row-action-danger { color: var(--st-dead_letter); border-color: var(--st-dead_letter); }
+.row-action-danger:hover { background: var(--st-dead_letter); color: #fff; }
 .closing { margin-top: 10px; }
 
 /* dev tools */
@@ -236,7 +246,8 @@ button.danger-solid { background: var(--bad); border-color: var(--bad); color: #
 
 /* drawer */
 .drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw);
+  /* Above the sticky table header/footer (z-index 1), below confirm dialogs (z-index 10). */
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 100vw); z-index: 5;
   background: var(--surface); border-left: 1px solid var(--border);
   padding: 16px; overflow-y: auto; box-shadow: -8px 0 24px rgba(0, 0, 0, .12);
 }
@@ -254,3 +265,25 @@ button.danger-solid { background: var(--bad); border-color: var(--bad); color: #
 .log-warning .log-level { color: var(--warn); }
 .log-error .log-level { color: var(--bad); }
 .log-meta { width: 100%; padding-left: 8px; color: var(--muted); font-size: 12px; }
+
+/* dead letter queue */
+.dlq-intro { margin: 0 0 10px; font-size: 12px; line-height: 1.5; flex-shrink: 0; }
+.cell-error { max-width: 260px; overflow: hidden; text-overflow: ellipsis; color: var(--st-dead_letter); }
+.payload-editor { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 12px; resize: vertical; }
+.dlq-help { margin: 6px 0 0; font-size: 12px; line-height: 1.5; }
+
+/* jobs panel tabs */
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  border: none; border-bottom: 2px solid transparent; border-radius: 0; background: none;
+  padding: 6px 10px; font-size: 15px; font-weight: 600; color: var(--muted);
+  margin-bottom: -1px;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.tab-dlq.active { color: var(--st-dead_letter); border-bottom-color: var(--st-dead_letter); }
+.tab-count {
+  font-size: 12px; font-weight: 500; padding: 0 7px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--border); color: var(--muted);
+}

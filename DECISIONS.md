@@ -53,7 +53,7 @@ handed to someone else.
   `status = 'processing' AND lease_expires_at < now()` using `FOR UPDATE SKIP LOCKED`.
 
 **Why:** A lease does not depend on the crashed process doing anything: if it stops
-heartbeating, the lease simply runs out. This handles every kind of death the same way
+heart-beating, the lease simply runs out. This handles every kind of death the same way
 (SIGKILL, OOM, a container being removed, a network partition). A fixed processing timeout alone
 would either be too short for slow jobs or too slow to detect crashes. Heartbeats separate "the
 job is slow" from "the worker is gone." I chose 30s/10s so a dead worker is noticed within about
@@ -66,7 +66,8 @@ half a minute, and three heartbeats have to be missed before a job is reclaimed.
 3. The reaper locks the row and records the lost attempt as a failure
    (`error_type = LeaseExpired`). It clears the lease token and applies the normal retry policy:
     - attempts left → `scheduled` with backoff, and it runs again on a healthy worker;
-    - no attempts left → `failed` and moved to the dead letter queue.
+    - no attempts left → `failed (temporarily)`. A crash says nothing about the job's data, so
+      it is never sent to the dead letter queue; it can be retried once the cause is fixed.
 
     This stops a job that crashes its worker every time from looping forever.
 
@@ -127,15 +128,28 @@ job log.
 | 1       | Immediately                                                                  |
 | 2       | 30 seconds after attempt 1 failed                                            |
 | 3       | 2 minutes after attempt 2 failed                                             |
-| —       | After attempt 3 fails → `failed` permanently, moved to the dead letter queue |
+| —       | After attempt 3 fails → `failed (temporarily)`, stays in the list, can be retried |
 
 Some rules on top of that:
 
-- **Poison messages** skip the retries and go straight to `failed` + DLQ. These are errors that
-  retrying can't fix, such as an unknown job type or an invalid payload.
 - **Timeouts and crashes** count as normal failed attempts.
-- **Manual retry** (`POST /jobs/{id}/retry`) resets a failed job to `pending` with a fresh
-  attempt budget and removes it from the DLQ.
+- **Manual retry** (`POST /jobs/{id}/retry`, or "Retry all" in the dashboard) resets a failed job
+  to `pending` with a fresh attempt budget.
+- **Corrupted data skips the retries and goes to the dead letter queue.** I separate two kinds of
+  failure, because they need different responses:
+    - **Failed (temporarily):** the data is fine, but something outside the job went wrong (a
+      webhook was down, a worker crashed, a timeout). Retrying later can succeed, so the job stays
+      in the jobs list as `failed`.
+    - **Dead letter (corrupted data):** the job can *never* succeed as it is, for example an
+      unknown job type or a payload that fails validation (the API validates on submit, so this
+      means the data was damaged later or written by another producer). Retrying is pointless.
+      On the first such error the worker moves the job, with its full log history, out of the
+      `jobs` table into a separate `dead_letter_jobs` table, in one transaction.
+
+  A separate table keeps the main jobs list free of jobs that will never run, and gives a
+  developer a place to inspect them: `GET /dead-letter` lists them, and each one can be **requeued**
+  with a corrected payload (refused with 409 while the payload is still invalid) or **discarded**.
+  A requeued job goes back to `jobs` as `pending`, under its original ID and with its history.
 
 ---
 
@@ -151,3 +165,42 @@ need different policies: a webhook to a flaky partner deserves more attempts and
 than a report job that fails for a deterministic reason. I would move `max_attempts`, the base
 delay and the factor into a per-type configuration, and let handlers mark specific errors as
 non-retryable (for example an HTTP 4xx from a webhook).
+
+---
+
+## 6. Why I Added the Front-End Even Though It Wasn't Defined in the Assignment
+
+**Approach chosen:** A small React dashboard (`App/frontend`), served by nginx as its own container
+in docker-compose. It talks to the backend only through the same public REST API a client would use.
+
+**Why:**
+
+- **Most of the interesting behavior happens over time.** The core of this system is a lifecycle:
+  `scheduled → pending → processing → completed / failed`, plus retries with backoff, priority
+  ordering and crash recovery. With `curl` you only see snapshots of it. In the dashboard I can
+  watch it happen live: a batch job's progress bar filling, a webhook failing and being
+  rescheduled 30 seconds later, a high-priority job overtaking a queue of low-priority ones, and
+  a job being recovered after I kill a worker.
+- **It made manual testing much faster.** The automated tests prove correctness. During
+  development I still wanted to check behavior end to end against real PostgreSQL and Redis.
+  The submit form, the status filters, the job log view and the "Fill" button (10 demo jobs,
+  some designed to fail temporarily, plus 3 with corrupted data) let me do that in seconds
+  instead of composing requests by hand.
+- **It makes the project easier to review.** A reviewer can run `docker compose up` and
+  immediately see the system working, without reading the API docs first.
+- **It kept the API honest.** Building a real client on top of the API surfaced gaps and dead
+  code. For example, it showed that the first version of the dead letter queue only duplicated
+  the `failed` status (which led me to redesign it for corrupted data only), and that a "rerun"
+  action for finished jobs was missing.
+
+**Trade-offs:**
+
+- *Gained:* faster feedback while developing, an easy demo, and a client that exercises the API
+  the way a real consumer would.
+- *Gave up:* time that could have gone into the backend, plus a second technology stack (Node/React)
+  to build and maintain. I limited the cost by keeping the frontend fully separate. The backend
+  doesn't depend on it, so the API, workers and tests all run without it.
+- The only backend additions made purely for the dashboard are two dev endpoints:
+  `POST /dev/reset` (the "Clear" button) and `POST /dev/corrupted-jobs` (the corrupted jobs that
+  "Fill" injects, bypassing validation). Both are disabled by default and only enabled through
+  `DEV_ENDPOINTS=true` in the local docker-compose setup.

@@ -6,7 +6,10 @@ const email = (to, subject) => ({ to, subject, body: "Demo message" });
 const hook = (path, failure_rate) => ({ url: `https://hooks.example.com/${path}`, method: "POST", failure_rate });
 
 // Submitted in this order. Mixes every job type, priorities and schedules, and includes
-// webhooks with failure_rate 1 so some jobs end up FAILED (two right away, one after a 30 s retry).
+// webhooks with failure_rate 1 so some jobs end up failed (temporarily): two right away, one after
+// a 30 s retry. After these, Fill also injects CORRUPTED_COUNT jobs with corrupted data (see below).
+export const CORRUPTED_COUNT = 3;
+
 export const DEMO_JOBS = [
   { type: "email", payload: email("alice@example.com", "Welcome aboard") },
   { type: "report", payload: { report_type: "monthly-sales", format: "pdf", params: { month: "2026-09" } }, priority: 5 },
@@ -23,13 +26,15 @@ export const DEMO_JOBS = [
 const DIALOGS = {
   fill: {
     title: "Add demo jobs?",
-    message: `Are you sure you want to add ${DEMO_JOBS.length} demo jobs to the list? Some of them are designed to fail.`,
+    message:
+      `Are you sure you want to add ${DEMO_JOBS.length} demo jobs to the list? Some of them are designed to fail ` +
+      `temporarily, plus ${CORRUPTED_COUNT} jobs with corrupted data that will end up in the dead letter queue.`,
     confirmLabel: "Yes, add jobs",
   },
   clear: {
     title: "Remove all jobs?",
     message:
-      "Are you sure you want to remove all jobs from the list? This permanently deletes every job, log and queued entry and starts over with a clean database.",
+      "Are you sure you want to remove all jobs from the list? This permanently deletes every job, log, dead letter and queued entry and starts over with a clean database.",
     confirmLabel: "Yes, remove everything",
     danger: true,
   },
@@ -42,6 +47,7 @@ export default function DevPanel({ onFilled, onCleared }) {
   const [status, setStatus] = useState(null);
 
   const fill = async () => {
+    const steps = DEMO_JOBS.length + 1;
     setBusy(`Submitting 0/${DEMO_JOBS.length}…`);
     let created = 0;
     try {
@@ -50,7 +56,14 @@ export default function DevPanel({ onFilled, onCleared }) {
         created += 1;
         setBusy(`Submitting ${index + 1}/${DEMO_JOBS.length}…`);
       }
-      setStatus({ kind: "ok", text: `Added ${created} demo jobs.` });
+      // Corrupted data can't go through the API (it would be rejected with 422), so a dev
+      // endpoint writes these straight to the database. Workers will dead-letter them.
+      setBusy(`Injecting ${CORRUPTED_COUNT} corrupted jobs (${steps}/${steps})…`);
+      await api.devCorruptedJobs(CORRUPTED_COUNT);
+      setStatus({
+        kind: "ok",
+        text: `Added ${created} demo jobs and ${CORRUPTED_COUNT} jobs with corrupted data.`,
+      });
     } catch (err) {
       setStatus({ kind: "error", text: `Stopped after ${created} jobs: ${err.message}` });
     } finally {
@@ -62,8 +75,11 @@ export default function DevPanel({ onFilled, onCleared }) {
   const clear = async () => {
     setBusy("Clearing…");
     try {
-      const { deleted_jobs } = await api.devReset();
-      setStatus({ kind: "ok", text: `Removed ${deleted_jobs} jobs. Database is clean.` });
+      const { deleted_jobs, deleted_dead_letters } = await api.devReset();
+      setStatus({
+        kind: "ok",
+        text: `Removed ${deleted_jobs} jobs and ${deleted_dead_letters} dead letters. Database is clean.`,
+      });
       onCleared();
     } catch (err) {
       setStatus({ kind: "error", text: err.message });
@@ -98,7 +114,8 @@ export default function DevPanel({ onFilled, onCleared }) {
             </button>
           </div>
           <p className="muted dev-help">
-            <strong>Fill</strong> submits {DEMO_JOBS.length} demo jobs (all types, priorities, schedules and some failures).{" "}
+            <strong>Fill</strong> submits {DEMO_JOBS.length} demo jobs (all types, priorities, schedules and some
+            temporary failures) and injects {CORRUPTED_COUNT} jobs with corrupted data for the dead letter queue.{" "}
             <strong>Clear</strong> deletes all data.
           </p>
           {busy && <div className="notice notice-info">{busy}</div>}

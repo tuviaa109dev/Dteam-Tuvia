@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
+import { statusLabel } from "../statusLabels.js";
 
 export default function StatusBadge({ status }) {
-  return <span className={`badge badge-${status}`}>{status}</span>;
+  return <span className={`badge badge-${status}`}>{statusLabel(status)}</span>;
 }
 
 export function ProgressBar({ value, tone }) {

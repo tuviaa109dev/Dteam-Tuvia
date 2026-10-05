@@ -115,8 +115,6 @@ class Job(Base):
     lease_token: Mapped[str | None] = mapped_column(String(36))
     lease_expires_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
 
-    dead_lettered_at: Mapped[datetime | None] = mapped_column(UTCDateTime)
-
     logs: Mapped[list["JobLog"]] = relationship(
         back_populates="job", cascade="all, delete-orphan", order_by="JobLog.id"
     )
@@ -135,6 +133,33 @@ class JobLog(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, default=utcnow)
 
     job: Mapped[Job] = relationship(back_populates="logs")
+
+
+class DeadLetterJob(Base):
+    """Dead letter queue: jobs whose data can never be processed (unknown type, invalid payload).
+
+    A worker moves such a job here, out of `jobs`, in one transaction. The row is a snapshot of
+    the job at that moment, including its full log history (as JSON, since its job_logs rows go
+    with the original job). Jobs that merely ran out of retries are NOT moved here; they stay in
+    `jobs` as `failed` and can be retried.
+    """
+
+    __tablename__ = "dead_letter_jobs"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)  # the original job's id
+    type: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    payload: Mapped[Any] = mapped_column(JSONType, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    max_attempts: Mapped[int] = mapped_column(Integer, nullable=False)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    error: Mapped[str] = mapped_column(Text, nullable=False)
+    error_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str | None] = mapped_column(String(255))
+    worker_id: Mapped[str | None] = mapped_column(String(128))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False)
+    dead_lettered_at: Mapped[datetime] = mapped_column(UTCDateTime, nullable=False, index=True)
+    logs: Mapped[list[dict[str, Any]]] = mapped_column(JSONType, nullable=False, default=list)
 
 
 class IdempotencyKey(Base):

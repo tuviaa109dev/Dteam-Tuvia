@@ -28,5 +28,24 @@ export const api = {
   cancelJob: (id) => request(`/jobs/${id}/cancel`, { method: "POST" }).then((r) => r.body),
   retryJob: (id) => request(`/jobs/${id}/retry`, { method: "POST" }).then((r) => r.body),
   rerunJob: (id) => request(`/jobs/${id}/rerun`, { method: "POST" }).then((r) => r.body),
+
+  // dead letter queue (jobs with corrupted data)
+  listDeadLetters: ({ type, limit = 50, offset = 0 }) => {
+    const params = new URLSearchParams({ limit, offset });
+    if (type) params.set("type", type);
+    return request(`/dead-letter?${params}`).then((r) => r.body);
+  },
+  getDeadLetter: (id) => request(`/dead-letter/${id}`).then((r) => r.body),
+  requeueDeadLetter: (id, payload) =>
+    request(`/dead-letter/${id}/requeue`, {
+      method: "POST",
+      body: JSON.stringify(payload === undefined ? {} : { payload }),
+    }).then((r) => r.body),
+  discardDeadLetter: (id) => request(`/dead-letter/${id}`, { method: "DELETE" }),
+  purgeDeadLetters: (type) =>
+    request(`/dead-letter${type ? `?type=${encodeURIComponent(type)}` : ""}`, { method: "DELETE" }).then((r) => r.body),
+
+  // dev tools (DEV_ENDPOINTS=true)
   devReset: () => request("/dev/reset", { method: "POST" }).then((r) => r.body),
+  devCorruptedJobs: (count = 3) => request(`/dev/corrupted-jobs?count=${count}`, { method: "POST" }).then((r) => r.body),
 };

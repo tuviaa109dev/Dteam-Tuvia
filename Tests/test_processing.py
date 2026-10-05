@@ -77,11 +77,11 @@ def test_batch_job_tracks_progress(submit, fetch, worker, session_factory, monke
     assert done["result"]["failures"][0]["index"] == 2
 
 
-# ---- failure, retry with backoff, dead letter queue ------------------------------------------
+# ---- failure, retry with backoff, dead letter queue (corrupted data) ---------------------------
 
 
-def test_failure_retries_with_exponential_backoff_then_dead_letters(client, submit, fetch, worker, queue,
-                                                                    session_factory, make_due):
+def test_failure_retries_with_exponential_backoff_then_fails_temporarily(client, submit, fetch, worker, queue,
+                                                                         session_factory, make_due):
     job = submit("webhook", {"url": "https://hooks.example.com/fail", "failure_rate": 1.0})
     job_id = job["id"]
 
@@ -107,22 +107,21 @@ def test_failure_retries_with_exponential_backoff_then_dead_letters(client, subm
     assert state["status"] == "scheduled" and state["attempts"] == 2
     assert 118 <= _seconds_until(state["run_at"]) <= 121
 
-    # Attempt 3 fails -> permanently failed and moved to the dead letter queue.
+    # Attempt 3 fails -> failed (temporarily). The data is fine, so it is NOT dead-lettered.
     make_due(job_id)
     with session_factory() as db:
         services.promote_due_jobs(db, queue)
     worker.run_once()
     state = fetch(job_id)
     assert state["status"] == "failed" and state["attempts"] == 3
-    assert state["dead_lettered_at"] is not None
-    assert queue.dead_letters() == [job_id]
+    assert client.get("/dead-letter").json()["total"] == 0
 
-    # Manual retry: back to pending with a fresh attempt budget, out of the DLQ.
+    # Manual retry: back to pending with a fresh attempt budget.
     response = client.post(f"/jobs/{job_id}/retry")
     assert response.status_code == 200
     retried = response.json()
     assert retried["status"] == "pending" and retried["attempts"] == 0 and retried["error"] is None
-    assert queue.dead_letters() == [] and queue.contains(job_id)
+    assert queue.contains(job_id)
 
 
 def test_transient_failure_then_success(submit, fetch, worker, queue, session_factory, make_due):
@@ -145,19 +144,19 @@ def test_transient_failure_then_success(submit, fetch, worker, queue, session_fa
     assert done["error"] is None
 
 
-def test_poison_message_goes_straight_to_dead_letter(submit, fetch, worker, queue, session_factory):
-    # A job whose payload cannot be processed (e.g. written by an older API version).
+def test_poison_message_goes_straight_to_dead_letter(client, submit, worker, queue, session_factory):
+    # A job whose payload cannot be processed (e.g. damaged after it was accepted).
     job = submit("email")
     with session_factory() as db:
         db.execute(update(Job).where(Job.id == job["id"]).values(payload={"garbage": True}))
         db.commit()
 
     worker.run_once()
-    state = fetch(job["id"])
-    assert state["status"] == "failed"
-    assert state["attempts"] == 1  # no pointless retries
-    assert state["error_type"] == "PermanentJobError"
-    assert queue.dead_letters() == [job["id"]]
+    response = client.get(f"/jobs/{job['id']}")
+    assert response.status_code == 404 and "dead letter queue" in response.json()["detail"]
+    dead = client.get(f"/dead-letter/{job['id']}").json()
+    assert dead["attempts"] == 1  # no pointless retries
+    assert dead["error_type"] == "PermanentJobError"
 
     # Queue entries pointing at nonexistent jobs are dropped and counted.
     queue.enqueue("no-such-job", 0)
@@ -274,13 +273,14 @@ def test_crashed_worker_job_is_recovered(submit, fetch, session_factory, queue, 
     assert fetch(job["id"])["result"] is None
 
 
-def test_crashed_worker_on_last_attempt_dead_letters(submit, fetch, session_factory, queue):
+def test_crashed_worker_on_last_attempt_fails_without_dead_lettering(client, submit, fetch, session_factory, queue):
+    # A crash says nothing about the data, so the job is failed (temporarily), not dead-lettered.
     job = submit("email", max_attempts=1)
     with session_factory() as db:
         services.claim_job(db, job["id"], "doomed-worker")
         services.reap_expired_leases(db, queue, now=utcnow() + timedelta(hours=1))
     assert fetch(job["id"])["status"] == "failed"
-    assert queue.dead_letters() == [job["id"]]
+    assert client.get("/dead-letter").json()["total"] == 0
 
 
 def test_reconciler_republishes_jobs_lost_from_redis(submit, fetch, session_factory, queue, worker):

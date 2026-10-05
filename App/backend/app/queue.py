@@ -21,7 +21,6 @@ class JobQueue:
         self.prefix = prefix
         self.ready_key = f"{prefix}:ready"
         self.seq_key = f"{prefix}:seq"
-        self.dlq_key = f"{prefix}:dlq"
         self.stats_key = f"{prefix}:stats"
         self.workers_prefix = f"{prefix}:workers:"
 
@@ -67,26 +66,9 @@ class JobQueue:
     def depth(self) -> int:
         return int(self.redis.zcard(self.ready_key))
 
-    # ---- dead letter queue -------------------------------------------------------------------
-
-    def dead_letter(self, job_id: str) -> None:
-        pipe = self.redis.pipeline()
-        pipe.lrem(self.dlq_key, 0, job_id)
-        pipe.lpush(self.dlq_key, job_id)
-        pipe.execute()
-
-    def remove_dead_letter(self, job_id: str) -> None:
-        self.redis.lrem(self.dlq_key, 0, job_id)
-
-    def dead_letters(self, limit: int = 100) -> list[str]:
-        return self.redis.lrange(self.dlq_key, 0, limit - 1)
-
-    def dlq_size(self) -> int:
-        return int(self.redis.llen(self.dlq_key))
-
     def reset(self) -> None:
-        """Drop all queued work, the DLQ and stats (dev reset). Live worker registrations stay."""
-        self.redis.delete(self.ready_key, self.dlq_key, self.stats_key, self.seq_key)
+        """Drop all queued work and stats (dev reset). Live worker registrations stay."""
+        self.redis.delete(self.ready_key, self.stats_key, self.seq_key)
 
     # ---- stats, worker registry, locks -------------------------------------------------------
 
