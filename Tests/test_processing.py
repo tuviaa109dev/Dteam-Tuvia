@@ -7,7 +7,7 @@ from sqlalchemy import select, update
 
 from app import services
 from app.config import settings
-from app.models import Job, JobLog, JobStatus, utcnow
+from app.models import Job, JobLog, utcnow
 from app.queue import JobQueue
 from app.worker.worker import Worker
 

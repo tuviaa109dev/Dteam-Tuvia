@@ -9,7 +9,7 @@ would offer.
 
 I always like to ask the AI to get the basic structure built and running, though I don't fully count on the AI,
 and I checked the Python in the Back-End to make sure it is structured correctly and logically. I also had the
-AI create the automated tests and the Front-End without too much interference, because in my experience Testing
+AI create the automated tests and the Front-End without too much interference, because in my experience testing
 and Front-End syntax are so straightforward that the chance of the AI getting them wrong is lower. It's also
 easier to catch mistakes there by running the app on localhost and checking the test outputs.
 
@@ -20,15 +20,15 @@ payload fits the job type should be the first step upon receiving a job (in the 
 validation should be in the Front-End before sending the request, but that is beyond the scope of this
 assignment.]
 
-At first, the JSON logging was only done in the worker, because only the worker had access to the DB with its
-JSON formatter. I requested that the JSON formatter also be used in the API, so that the logging would have
-access to the JSON data in the DB at other stages of the job lifecycle as well.
+At first, the JSON logging was only done in the worker. I requested that the JSON formatter also be used in the
+API, so that every stage of the job lifecycle (submission, cancellation, retries) produces structured logs with the
+job's context, not only the worker.
 
 ## What AI Struggled With
 
 The Dead Letter Queue was something the AI tools were not consistent about. At first, the AI created the DLQ
 routes (POST, GET...) but then didn't find any reason to use them. In the Front-End there is an option to
-filter out all the statuses except "failed" and the single source truth is the DB, so there was no actual need
+filter out all the statuses except "failed" and the single source of truth is the DB, so there was no actual need
 to move all the "failed" jobs to a separate queue, which made the routes useless. So I asked to remove them so
 there wouldn't be useless code. But that left a DLQ that only duplicated the "failed" status, so I redesigned
 it around the difference between two kinds of failure:

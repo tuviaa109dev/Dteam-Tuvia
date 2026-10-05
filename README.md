@@ -185,8 +185,9 @@ curl http://localhost:8000/dead-letter
   running, a heartbeat renews the job's 30-second **lease**. Failures are retried with
   exponential backoff (30 s, then 120 s). After 3 attempts the job is **failed (temporarily)**
   and can be retried. A job with **corrupted data** (unknown type, invalid payload) is never
-  retried: it is moved to the **dead letter queue**, a separate table where it can be inspected,
-  fixed and requeued, or discarded. On SIGTERM a worker finishes its current job before exiting.
+  retried: it is moved to the **dead letter queue**, a separate table (the dashboard's
+  **DLQ - dev** tab) where it can be inspected, fixed and requeued, or discarded. On SIGTERM a
+  worker finishes its current job before exiting.
 - **Maintenance loop** (inside each worker, coordinated by a Redis lock):
     - promotes due **scheduled** jobs to the queue;
     - **reaps** jobs whose lease expired (crashed worker) and retries them;
