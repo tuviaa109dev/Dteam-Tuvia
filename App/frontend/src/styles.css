@@ -213,6 +213,8 @@ tfoot td { border-bottom: none; padding-top: 10px; }
 .row-action { padding: 2px 10px; font-size: 12px; color: var(--accent); border-color: var(--accent); }
 .row-action:hover { background: var(--accent); color: #fff; }
 .row-action-danger { color: var(--st-dead_letter); border-color: var(--st-dead_letter); }
+.row-action-cancel { color: var(--bad); border-color: var(--bad); }
+.row-action-cancel:hover { background: var(--bad); color: #fff; }
 .row-action-danger:hover { background: var(--st-dead_letter); color: #fff; }
 .closing { margin-top: 10px; }
 

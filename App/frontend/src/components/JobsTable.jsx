@@ -21,6 +21,8 @@ const ACTIONS = {
   failed: { label: "Retry", bulkLabel: "Retry all", verb: "retry", fn: api.retryJob },
   cancelled: { label: "Rerun", bulkLabel: "Rerun all", verb: "rerun", fn: api.rerunJob },
   completed: { label: "Rerun", verb: "rerun", fn: api.rerunJob },
+  scheduled: { label: "Cancel", verb: "cancel", fn: api.cancelJob, danger: true },
+  pending: { label: "Cancel", verb: "cancel", fn: api.cancelJob, danger: true },
 };
 
 function SentDue({ job }) {
@@ -40,10 +42,10 @@ function SentDue({ job }) {
 
 function RowAction({ job, onAction }) {
   const action = ACTIONS[job.status];
-  if (!action) return "—"; // scheduled / pending / processing
+  if (!action) return "—"; // processing: already running, can't be cancelled
   return (
     <button
-      className="row-action"
+      className={`row-action ${action.danger ? "row-action-cancel" : ""}`}
       onClick={(e) => {
         e.stopPropagation(); // don't also select the row
         onAction(action.fn, job);
