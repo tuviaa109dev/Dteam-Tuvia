@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api.js";
 
 const NOTICE_MS = 5000;
@@ -184,11 +184,73 @@ function PayloadFields({ type, fields, set }) {
   }
 }
 
+/** A Date as the value of a datetime-local input: local time, to the second. */
+function toLocalInput(date) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+    `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+  );
+}
+
+function CalendarIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="4" width="18" height="18" rx="2" />
+      <path d="M16 2v4M8 2v4M3 10h18" />
+    </svg>
+  );
+}
+
+/** Date + time (hours, minutes, seconds) picker. Empty means "run now". */
+function ScheduleField({ value, onChange }) {
+  const inputRef = useRef(null);
+
+  const openPicker = () => {
+    // Start from one minute from now, so the picker opens on a sensible future time.
+    if (!value) onChange(toLocalInput(new Date(Date.now() + 60_000)));
+    requestAnimationFrame(() => {
+      try {
+        inputRef.current.showPicker();
+      } catch {
+        inputRef.current.focus(); // browsers without showPicker(): edit the fields directly
+      }
+    });
+  };
+
+  return (
+    <div className="field">
+      <span>
+        Schedule <span className="hint">· {value ? "your local time" : "empty = run now"}</span>
+      </span>
+      <div className="schedule-row">
+        <input
+          ref={inputRef}
+          type="datetime-local"
+          step="1"
+          min={toLocalInput(new Date())}
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+        />
+        <button type="button" className="icon-button" aria-label="Open date and time picker" title="Pick date and time" onClick={openPicker}>
+          <CalendarIcon />
+        </button>
+        {value && (
+          <button type="button" className="icon-button" aria-label="Clear schedule (run now)" title="Run now" onClick={() => onChange("")}>
+            ✕
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function SubmitJobForm({ onSubmitted }) {
   const [type, setType] = useState("email");
   const [fieldsByType, setFieldsByType] = useState(DEFAULT_FIELDS);
   const [priority, setPriority] = useState(0);
-  const [delay, setDelay] = useState("");
+  const [schedule, setSchedule] = useState(""); // datetime-local value, "" = run now
   const [maxAttempts, setMaxAttempts] = useState(3);
   const [idempotencyKey, setIdempotencyKey] = useState("");
   const [notice, setNotice] = useState(null);
@@ -204,10 +266,10 @@ export default function SubmitJobForm({ onSubmitted }) {
       priority: Number(priority),
       max_attempts: Number(maxAttempts),
     };
-    if (delay !== "" && Number(delay) > 0) job.delay_seconds = Number(delay);
+    if (schedule) job.scheduled_at = new Date(schedule).toISOString(); // local time -> UTC
     if (idempotencyKey.trim()) job.idempotency_key = idempotencyKey.trim();
     return job;
-  }, [type, fields, priority, maxAttempts, delay, idempotencyKey]);
+  }, [type, fields, priority, maxAttempts, schedule, idempotencyKey]);
 
   // Success/info notices float over the JSON preview for 5 s; errors stay until dismissed.
   useEffect(() => {
@@ -255,21 +317,29 @@ export default function SubmitJobForm({ onSubmitted }) {
         <PayloadFields type={type} fields={fields} set={setFields} />
       </fieldset>
 
-      <div className="row">
-        <Field label="Priority">
-          <input type="number" min={-100} max={100} value={priority} onChange={(e) => setPriority(e.target.value)} />
-        </Field>
+      <Field label="Priority" hint={`${priority > 0 ? "+" : ""}${priority} · higher runs first`}>
+        <div className="priority-range">
+          <span className="muted">-100</span>
+          <input
+            type="range" min={-100} max={100} step={1} value={priority}
+            onChange={(e) => setPriority(Number(e.target.value))}
+            onDoubleClick={() => setPriority(0)}
+            title="Double-click to reset to 0"
+          />
+          <span className="muted">100</span>
+        </div>
+      </Field>
+
+      <ScheduleField value={schedule} onChange={setSchedule} />
+
+      <div className="row row-2">
         <Field label="Max attempts">
           <input type="number" min={1} max={10} value={maxAttempts} onChange={(e) => setMaxAttempts(e.target.value)} />
         </Field>
-        <Field label="Delay (s)">
-          <input type="number" min={0} placeholder="now" value={delay} onChange={(e) => setDelay(e.target.value)} />
+        <Field label="Idempotency key">
+          <input placeholder="optional" value={idempotencyKey} onChange={(e) => setIdempotencyKey(e.target.value)} />
         </Field>
       </div>
-
-      <Field label="Idempotency key">
-        <input placeholder="optional" value={idempotencyKey} onChange={(e) => setIdempotencyKey(e.target.value)} />
-      </Field>
 
       <button className="primary" disabled={busy}>
         {busy ? "Submitting…" : "Submit job"}
