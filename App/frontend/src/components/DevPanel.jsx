@@ -3,11 +3,16 @@ import { api } from "../api.js";
 import ConfirmDialog from "./ConfirmDialog.jsx";
 
 const email = (to, subject) => ({ to, subject, body: "Demo message" });
-const hook = (path, failure_rate) => ({ url: `https://hooks.example.com/${path}`, method: "POST", failure_rate });
+const hook = (path, failure_rate, extra = {}) => ({
+  url: `https://hooks.example.com/${path}`, method: "POST", failure_rate, ...extra,
+});
 
-// Submitted in this order. Mixes every job type, priorities and schedules, and includes
-// webhooks with failure_rate 1 so some jobs end up failed (temporarily): two right away, one after
-// a 30 s retry. After these, Fill also injects CORRUPTED_COUNT jobs with corrupted data (see below).
+// Submitted in this order. Mixes every job type, priorities and schedules, and three kinds of
+// webhook failure:
+// - "flaky-crm" is temporarily unavailable: its first attempt fails, the retry 30 s later succeeds
+// - "orders" fails at random (20% per attempt), so it may or may not need a retry
+// - "broken-partner" and "legacy-api" always fail and end up failed (temporarily)
+// After these, Fill also injects CORRUPTED_COUNT jobs with corrupted data (see below).
 export const CORRUPTED_COUNT = 3;
 
 export const DEMO_JOBS = [
@@ -17,7 +22,7 @@ export const DEMO_JOBS = [
   { type: "webhook", payload: hook("broken-partner", 1), max_attempts: 1 },
   { type: "email", payload: email("ops@example.com", "URGENT: disk almost full"), priority: 50 },
   { type: "webhook", payload: hook("orders", 0.2) },
-  { type: "webhook", payload: hook("flaky-crm", 1), max_attempts: 2 },
+  { type: "webhook", payload: hook("flaky-crm", 0, { fail_attempts: 1 }) },
   { type: "report", payload: { report_type: "inventory", format: "csv" }, delay_seconds: 45 },
   { type: "email", payload: email("bob@example.com", "Your weekly digest"), priority: 10, delay_seconds: 20 },
   { type: "webhook", payload: hook("legacy-api", 1), max_attempts: 1, priority: 20 },

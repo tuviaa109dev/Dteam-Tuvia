@@ -26,6 +26,9 @@ class WebhookPayload(_Payload):
     body: dict[str, Any] | None = None
     # Probability of a simulated failure. The spec's 20% is the default; tests pin it to 0 or 1.
     failure_rate: float = Field(0.2, ge=0, le=1)
+    # Simulated outage: the endpoint is "temporarily unavailable" for the first N attempts, then
+    # recovers (failure_rate still applies after that). Shows a retry that succeeds.
+    fail_attempts: int = Field(0, ge=0, le=10)
 
 
 class ReportPayload(_Payload):

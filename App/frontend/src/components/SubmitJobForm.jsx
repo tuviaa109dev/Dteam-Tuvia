@@ -11,6 +11,7 @@ const DEFAULT_FIELDS = {
     method: "POST",
     body: [{ key: "order_id", value: "42" }],
     failure_rate: 0.2,
+    fail_attempts: 0,
   },
   report: { report_type: "monthly-sales", format: "pdf", params: [{ key: "month", value: "2026-09" }] },
   batch: {
@@ -45,6 +46,7 @@ function buildPayload(type, f) {
         method: f.method,
         ...(Object.keys(body).length ? { body } : {}),
         failure_rate: Number(f.failure_rate),
+        ...(Number(f.fail_attempts) > 0 ? { fail_attempts: Number(f.fail_attempts) } : {}),
       };
     }
     case "report":
@@ -130,6 +132,12 @@ function PayloadFields({ type, fields, set }) {
             <input
               type="range" min={0} max={1} step={0.05} value={fields.failure_rate}
               onChange={(e) => set({ failure_rate: Number(e.target.value) })}
+            />
+          </Field>
+          <Field label="Unavailable for the first" hint="attempts, then recovers (simulated outage)">
+            <input
+              type="number" min={0} max={10} value={fields.fail_attempts}
+              onChange={(e) => set({ fail_attempts: e.target.value })}
             />
           </Field>
         </>

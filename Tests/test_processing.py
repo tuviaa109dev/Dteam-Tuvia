@@ -124,24 +124,26 @@ def test_failure_retries_with_exponential_backoff_then_fails_temporarily(client,
     assert queue.contains(job_id)
 
 
-def test_transient_failure_then_success(submit, fetch, worker, queue, session_factory, make_due):
-    job = submit("webhook", {"url": "https://hooks.example.com/flaky", "failure_rate": 1.0})
-    worker.run_once()
-    assert fetch(job["id"])["status"] == "scheduled"
+def test_transient_failure_then_success(client, submit, fetch, worker, queue, session_factory, make_due):
+    # The endpoint is "temporarily unavailable" for 2 attempts, then recovers.
+    job = submit("webhook", {"url": "https://hooks.example.com/flaky", "failure_rate": 0.0, "fail_attempts": 2})
+    job_id = job["id"]
 
-    # The downstream system "recovers".
-    with session_factory() as db:
-        db.execute(update(Job).where(Job.id == job["id"]).values(
-            payload={"url": "https://hooks.example.com/flaky", "failure_rate": 0.0}))
-        db.commit()
-    make_due(job["id"])
-    with session_factory() as db:
-        services.promote_due_jobs(db, queue)
-    worker.run_once()
+    for attempt in (1, 2):
+        assert worker.run_once() == job_id
+        state = fetch(job_id)
+        assert state["status"] == "scheduled" and state["attempts"] == attempt
+        assert "simulated outage" in state["error"]
+        make_due(job_id)
+        with session_factory() as db:
+            services.promote_due_jobs(db, queue)
 
-    done = fetch(job["id"])
-    assert done["status"] == "completed" and done["attempts"] == 2
-    assert done["error"] is None
+    assert worker.run_once() == job_id  # attempt 3: the endpoint is back
+    done = fetch(job_id)
+    assert done["status"] == "completed" and done["attempts"] == 3
+    assert done["error"] is None and done["result"]["status_code"] == 200
+    messages = [e["message"] for e in client.get(f"/jobs/{job_id}/logs").json()]
+    assert sum("retrying in" in m for m in messages) == 2 and messages[-1] == "job completed"
 
 
 def test_poison_message_goes_straight_to_dead_letter(client, submit, worker, queue, session_factory):

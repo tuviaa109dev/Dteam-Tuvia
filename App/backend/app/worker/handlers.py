@@ -84,6 +84,11 @@ def handle_email(ctx: JobContext, p: EmailPayload) -> dict[str, Any]:
 def handle_webhook(ctx: JobContext, p: WebhookPayload) -> dict[str, Any]:
     started = time.monotonic()
     ctx.sleep(ctx.rng.uniform(1, 2))
+    if ctx.attempt <= p.fail_attempts:
+        raise JobError(
+            f"webhook {p.method} {p.url} failed: 503 Service Unavailable "
+            f"(simulated outage: attempt {ctx.attempt} of the first {p.fail_attempts} that fail)"
+        )
     if ctx.rng.random() < p.failure_rate:
         raise JobError(f"webhook {p.method} {p.url} failed: 503 Service Unavailable (simulated)")
     return {

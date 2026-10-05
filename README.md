@@ -125,6 +125,7 @@ all data.
 | --------- | ---------------------------------------------------------- | --------------------------------------- |
 | `email`   | `{"to": "a@b.com", "subject": "Hi", "body": "..."}`        | 1–3 s, returns mock `message_id`        |
 | `webhook` | `{"url": "https://example.com/hook", "failure_rate": 0.2}` | 1–2 s, 20% simulated failures (retried) |
+| `webhook` | `{"url": "https://example.com/hook", "failure_rate": 0, "fail_attempts": 1}` | "temporarily unavailable": fails the first N attempts, then succeeds on retry |
 | `report`  | `{"report_type": "sales", "format": "pdf"}`                | 3–5 s, returns mock `file_url`          |
 | `batch`   | `{"items": [1,2,3,4,5,6,7,8,9,10], "item_delay_ms": 300}`  | live `progress` %, returns summary      |
 
@@ -135,6 +136,9 @@ Optional job fields: `priority` (-100…100, higher first; default 0), `max_atte
 **Failure scenarios to try:**
 
 ```bash
+# Temporarily unavailable webhook: attempt 1 fails, the retry 30 s later succeeds
+curl -X POST http://localhost:8000/jobs -H "Content-Type: application/json"   -d '{"type":"webhook","payload":{"url":"https://example.com/hook","failure_rate":0,"fail_attempts":1}}'
+
 # Always-failing webhook: runs now, retries after 30 s and 120 s, then "failed (temporarily)" 
 curl -X POST http://localhost:8000/jobs -H "Content-Type: application/json" \
   -d '{"type":"webhook","payload":{"url":"https://example.com/hook","failure_rate":1}}'
